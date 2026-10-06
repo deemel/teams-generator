@@ -1186,6 +1186,12 @@
             saveToLocalStorage();
         }
 
+        /**
+         * Resets the currently selected roster: removes its saved state and
+         * reloads it fresh from its built-in definition. Runs when the user
+         * clicks Reset, and also automatically on app startup (see the
+         * initialization at the bottom of this script).
+         */
         function resetTracker() {
             const currentRoster = document.getElementById('rosterSelect').value;
             localStorage.removeItem(STORAGE_KEY_PREFIX + currentRoster);
@@ -1642,10 +1648,13 @@
 
         // Initialize state on page load. Default to today's roster if one
         // exists; otherwise fall back to whichever roster was last used.
+        // Once the roster is loaded, apply the same reset the Reset button
+        // performs, so the app always starts that roster fresh.
         const todayRoster = getDefaultRosterKeyForToday();
         const initialRoster = todayRoster || localStorage.getItem(STORAGE_KEY_LAST_ROSTER) || 'empty';
         document.getElementById('rosterSelect').value = initialRoster;
         switchRoster();
+        resetTracker();
     </script>
 
     <script>
