@@ -1372,10 +1372,26 @@
             // Remove game entry from history
             gamesHistory.splice(historyIndex, 1);
 
+            // Any open preview was generated from the old history (streaks and
+            // games played), so it no longer reflects who should be playing.
+            // Clear it so Accept can't record a stale lineup. Only notify the
+            // user if the preview was still pending — an already-accepted
+            // preview has nothing left to lose.
+            const outputCard = document.getElementById('outputCard');
+            const acceptBtn = document.getElementById('acceptBtn');
+            const previewWasPending = outputCard.style.display !== 'none' && !acceptBtn.disabled;
+            pendingTeam1Names = [];
+            pendingTeam2Names = [];
+            outputCard.style.display = 'none';
+
             recalculateGamesOffsets();
             renderPlayerList();
             renderHistory();
             saveToLocalStorage();
+
+            if (previewWasPending) {
+                showAlert("Teams preview cleared because game history changed. Generate again for updated teams.");
+            }
         }
 
         /**
