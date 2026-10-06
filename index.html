@@ -607,8 +607,12 @@
         const STORAGE_KEY_LAST_ROSTER = 'teams_tracker_last_roster';
 
         let players = empty.map(p => ({ ...p }));
-        let pendingTeam1Indices = [];
-        let pendingTeam2Indices = [];
+        // Previewed teams are stored by player NAME, not by index into the
+        // players array. Indices go stale whenever that array is re-sorted
+        // (e.g. addPlayer()) between Generate and Accept/Copy; names are
+        // unique per roster and never change, so they stay valid.
+        let pendingTeam1Names = [];
+        let pendingTeam2Names = [];
         let lastGameIndices = [];
         let gamesHistory = [];
 
@@ -859,8 +863,8 @@
                 gamesHistory = [];
             }
 
-            pendingTeam1Indices = [];
-            pendingTeam2Indices = [];
+            pendingTeam1Names = [];
+            pendingTeam2Names = [];
             
             document.getElementById('playersPerTeamInput').value = 5;
             document.getElementById('outputCard').style.display = 'none';
@@ -1115,8 +1119,8 @@
             let sourceList = getRosterByKey(currentRoster);
             players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null }));
             lastGameIndices = [];
-            pendingTeam1Indices = [];
-            pendingTeam2Indices = [];
+            pendingTeam1Names = [];
+            pendingTeam2Names = [];
             gamesHistory = [];
             document.getElementById('playersPerTeamInput').value = 5;
             document.getElementById('newPlayerName').value = '';
@@ -1219,12 +1223,12 @@
             // Randomly divide chosen players between Team 1 and Team 2
             chosenPlayers.sort(() => Math.random() - 0.5);
 
-            pendingTeam1Indices = chosenPlayers.slice(0, perTeamInput);
-            pendingTeam2Indices = chosenPlayers.slice(perTeamInput, totalNeeded);
-
-            // Sort players alphabetically for visual presentation
-            pendingTeam1Indices.sort((a, b) => players[a].name.localeCompare(players[b].name, 'en', { sensitivity: 'accent' }));
-            pendingTeam2Indices.sort((a, b) => players[a].name.localeCompare(players[b].name, 'en', { sensitivity: 'accent' }));
+            // Store names rather than array indices: indices go stale if the
+            // players array is re-sorted (e.g. addPlayer()) before Accept/Copy.
+            // Sorted alphabetically for visual presentation.
+            const byName = (a, b) => a.localeCompare(b, 'en', { sensitivity: 'accent' });
+            pendingTeam1Names = chosenPlayers.slice(0, perTeamInput).map(i => players[i].name).sort(byName);
+            pendingTeam2Names = chosenPlayers.slice(perTeamInput, totalNeeded).map(i => players[i].name).sort(byName);
 
             // 6. Update UI
             const team1List = document.getElementById('team1List');
@@ -1233,15 +1237,15 @@
             team1List.innerHTML = '';
             team2List.innerHTML = '';
 
-            pendingTeam1Indices.forEach(i => {
+            pendingTeam1Names.forEach(name => {
                 let li = document.createElement('li');
-                li.textContent = players[i].name;
+                li.textContent = name;
                 team1List.appendChild(li);
             });
 
-            pendingTeam2Indices.forEach(i => {
+            pendingTeam2Names.forEach(name => {
                 let li = document.createElement('li');
-                li.textContent = players[i].name;
+                li.textContent = name;
                 team2List.appendChild(li);
             });
 
@@ -1253,20 +1257,20 @@
         }
 
         function copyTeamsToClipboard() {
-            if (pendingTeam1Indices.length === 0 && pendingTeam2Indices.length === 0) {
+            if (pendingTeam1Names.length === 0 && pendingTeam2Names.length === 0) {
                 showAlert("Generate teams first before copying.");
                 return;
             }
 
             let lines = [];
             lines.push("Team 1:");
-            pendingTeam1Indices.forEach((i, idx) => {
-                lines.push(`${idx + 1}. ${players[i].name}`);
+            pendingTeam1Names.forEach((name, idx) => {
+                lines.push(`${idx + 1}. ${name}`);
             });
             lines.push("");
             lines.push("Team 2:");
-            pendingTeam2Indices.forEach((i, idx) => {
-                lines.push(`${idx + 1}. ${players[i].name}`);
+            pendingTeam2Names.forEach((name, idx) => {
+                lines.push(`${idx + 1}. ${name}`);
             });
 
             let teamsText = lines.join("\n");
@@ -1310,27 +1314,26 @@
         }
 
         function acceptLineup() {
-            let currentSelectedTeam = [...pendingTeam1Indices, ...pendingTeam2Indices];
+            const selectedNames = new Set([...pendingTeam1Names, ...pendingTeam2Names]);
 
-            players.forEach((p, i) => {
-                if (p.available) {
-                    if (currentSelectedTeam.includes(i)) {
-                        p.gamesPlayed++;
-                    }
+            players.forEach(p => {
+                if (p.available && selectedNames.has(p.name)) {
+                    p.gamesPlayed++;
                 }
             });
 
-            lastGameIndices = currentSelectedTeam;
+            // Resolved fresh from names against the current array order
+            lastGameIndices = players
+                .map((p, idx) => selectedNames.has(p.name) ? idx : -1)
+                .filter(idx => idx !== -1);
             renderPlayerList();
 
             // Add to games history with the current date/time as a display
             // string only. We do NOT store or sort by a numeric timestamp
             // (e.g. Date.now()) — see getSortedHistoryIndices() for why.
-            let team1Names = pendingTeam1Indices.map(i => players[i].name);
-            let team2Names = pendingTeam2Indices.map(i => players[i].name);
             gamesHistory.push({
-                team1: team1Names,
-                team2: team2Names,
+                team1: [...pendingTeam1Names],
+                team2: [...pendingTeam2Names],
                 timestamp: new Date().toLocaleString()
             });
             renderHistory();
