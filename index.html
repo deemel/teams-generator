@@ -433,7 +433,7 @@
         <div class="control-row">
             <div class="control-group">
                 <label for="rosterSelect" style="font-weight: bold; color: #333; font-size: 14px;">Roster:</label>
-                <select id="rosterSelect" onchange="switchRoster()">
+                <select id="rosterSelect" onchange="onRosterSelected()">
                     <option value="empty" selected>Custom (Empty)</option>
                     <option value="monday">Monday</option>
                     <option value="tuesday">Tuesday</option>
@@ -969,6 +969,17 @@
             }
         }
 
+        /**
+         * Loads the roster currently chosen in the dropdown, then applies the
+         * same reset the Reset button performs, so the roster always starts
+         * fresh. Used both when the user picks a roster from the dropdown and
+         * on app startup, so the two always behave identically.
+         */
+        function onRosterSelected() {
+            switchRoster();
+            resetTracker();
+        }
+
         function showAlert(message) {
             const alertBox = document.getElementById('customAlert');
             const alertMsg = document.getElementById('customAlertMsg');
@@ -1189,8 +1200,8 @@
         /**
          * Resets the currently selected roster: removes its saved state and
          * reloads it fresh from its built-in definition. Runs when the user
-         * clicks Reset, and also automatically on app startup (see the
-         * initialization at the bottom of this script).
+         * clicks Reset, and also automatically whenever a roster is selected
+         * (from the dropdown or on app startup — see onRosterSelected()).
          */
         function resetTracker() {
             const currentRoster = document.getElementById('rosterSelect').value;
@@ -1648,13 +1659,12 @@
 
         // Initialize state on page load. Default to today's roster if one
         // exists; otherwise fall back to whichever roster was last used.
-        // Once the roster is loaded, apply the same reset the Reset button
-        // performs, so the app always starts that roster fresh.
+        // onRosterSelected() loads it and applies the same reset as the Reset
+        // button — exactly what happens when a roster is picked from the dropdown.
         const todayRoster = getDefaultRosterKeyForToday();
         const initialRoster = todayRoster || localStorage.getItem(STORAGE_KEY_LAST_ROSTER) || 'empty';
         document.getElementById('rosterSelect').value = initialRoster;
-        switchRoster();
-        resetTracker();
+        onRosterSelected();
     </script>
 
     <script>
