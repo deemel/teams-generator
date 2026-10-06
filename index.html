@@ -800,6 +800,16 @@
         }
 
         /**
+         * Joins names into readable English: "A", "A and B", "A, B, and C".
+         * Used for user-facing messages that list players.
+         */
+        function formatNameList(names) {
+            if (names.length <= 1) return names.join('');
+            if (names.length === 2) return `${names[0]} and ${names[1]}`;
+            return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+        }
+
+        /**
          * Converts a checkInTimestamp into minutes since midnight (local time),
          * matching the same hh:mm granularity shown in the UI via
          * formatCheckInTime(). Used for sorting so two check-ins that display
@@ -1375,13 +1385,33 @@
         }
 
         function acceptLineup() {
-            const selectedNames = new Set([...pendingTeam1Names, ...pendingTeam2Names]);
+            const previewNames = [...pendingTeam1Names, ...pendingTeam2Names];
 
+            // Refuse to record a lineup that's gone stale: if anyone in the
+            // preview has been marked unavailable (or no longer exists) since
+            // Generate, the preview no longer reflects who's actually playing.
+            // Recording it anyway would put players in history who weren't
+            // credited, corrupting streaks, deletions, and offset corrections.
+            const unavailableNames = previewNames.filter(name => {
+                const player = players.find(p => p.name === name);
+                return !player || !player.available;
+            });
+            if (unavailableNames.length > 0) {
+                const verb = unavailableNames.length === 1 ? 'is' : 'are';
+                showAlert(`${formatNameList(unavailableNames)} ${verb} no longer available. Generate again to update teams.`);
+                return;
+            }
+
+            // Everyone in the lineup is confirmed available, so every name
+            // recorded in history below is also credited here — the two
+            // always stay in sync.
+            const selectedNames = new Set(previewNames);
             players.forEach(p => {
-                if (p.available && selectedNames.has(p.name)) {
+                if (selectedNames.has(p.name)) {
                     p.gamesPlayed++;
                 }
             });
+            hideAlert();
             renderPlayerList();
 
             // Add to games history with the current date/time as a display
