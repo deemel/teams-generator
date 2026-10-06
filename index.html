@@ -797,6 +797,18 @@
         }
 
         /**
+         * Returns only the games played today (local calendar date), in their
+         * original chronological order. Games recorded before the per-game
+         * `date` field existed have no date and are excluded. Used by both the
+         * streak logic and teammate-repeat avoidance, so "today" means exactly
+         * the same thing in both places.
+         */
+        function getTodaysGames() {
+            const todayKey = getLocalDateKey();
+            return gamesHistory.filter(game => game.date === todayKey);
+        }
+
+        /**
          * Escapes HTML-significant characters in a string before it's interpolated
          * into an innerHTML template. Needed because player names and other
          * user-entered text are set via innerHTML template strings (not textContent,
@@ -1226,19 +1238,15 @@
         const SPLIT_ATTEMPTS = 2000;
 
         /**
-         * Returns every team from games played today (local calendar date) as
-         * a Set of player names, for fast membership checks. Games recorded
-         * before the per-game date was stored have no `date` and are excluded.
+         * Returns every team from games played today (see getTodaysGames()) as
+         * a Set of player names, for fast membership checks.
          */
         function getPastTeams() {
-            const todayKey = getLocalDateKey();
             const teams = [];
-            gamesHistory
-                .filter(game => game.date === todayKey)
-                .forEach(game => {
-                    teams.push(new Set(game.team1));
-                    teams.push(new Set(game.team2));
-                });
+            getTodaysGames().forEach(game => {
+                teams.push(new Set(game.team1));
+                teams.push(new Set(game.team2));
+            });
             return teams;
         }
 
@@ -1316,23 +1324,28 @@
                 return;
             }
 
+            // Streaks only consider games played today, so last session's games
+            // don't affect today's sit-out priority. Filtered once here rather
+            // than once per player.
+            const todaysGames = getTodaysGames();
+
             /**
-             * Streak Score Helper:
+             * Streak Score Helper (today's games only):
              * - Returns a NEGATIVE number for consecutive games SAT OUT (e.g., -2 = sat out 2 straight games).
              * - Returns a POSITIVE number for consecutive games PLAYED (e.g., +2 = played 2 straight games).
-             * - Returns 0 if no games have been recorded yet.
+             * - Returns 0 if no games have been recorded yet today.
              */
             function getStreakScore(playerIndex) {
                 let playerName = players[playerIndex].name;
-                if (gamesHistory.length === 0) return 0;
+                if (todaysGames.length === 0) return 0;
 
                 // Check last game played state
-                let lastGame = gamesHistory[gamesHistory.length - 1];
+                let lastGame = todaysGames[todaysGames.length - 1];
                 let playedLast = lastGame.team1.includes(playerName) || lastGame.team2.includes(playerName);
 
                 let streak = 0;
-                for (let i = gamesHistory.length - 1; i >= 0; i--) {
-                    let game = gamesHistory[i];
+                for (let i = todaysGames.length - 1; i >= 0; i--) {
+                    let game = todaysGames[i];
                     let playedInGame = game.team1.includes(playerName) || game.team2.includes(playerName);
 
                     if (playedInGame === playedLast) {
@@ -1509,7 +1522,8 @@
             // Add to games history. `timestamp` is a display string only, and
             // history is never sorted by time — see getSortedHistoryIndices()
             // for why. `date` is a local calendar-date key used only to tell
-            // which games were played today (for teammate-repeat avoidance).
+            // which games were played today (streaks and teammate-repeat
+            // avoidance — see getTodaysGames()).
             const now = new Date();
             gamesHistory.push({
                 team1: [...pendingTeam1Names],
