@@ -1131,6 +1131,25 @@
             }
         }
 
+        /**
+         * Shuffles an array in place using the Fisher–Yates algorithm and
+         * returns it. Every possible ordering is exactly equally likely.
+         *
+         * Used instead of the common sort(() => Math.random() - 0.5) trick,
+         * which is biased: sort() assumes a consistent comparator, so random
+         * answers make elements tend to stay near their starting positions
+         * (and the exact bias varies by browser). Since the arrays shuffled
+         * here start in alphabetical or priority order, that bias would leak
+         * into who wins tie-breaks and who ends up on which team.
+         */
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
         function generateTeams() {
             hideAlert();
     
@@ -1200,8 +1219,10 @@
                 .forEach(score => {
                     let group = groupedMap[score];
 
-                    // Pre-shuffle so any exact ties in effective games played land in random order
-                    group.sort(() => Math.random() - 0.5);
+                    // Pre-shuffle so any exact ties in effective games played land
+                    // in a genuinely random order (see shuffle() for why this isn't
+                    // done with sort())
+                    shuffle(group);
 
                     // Within each streak tier, prioritize players with fewer effective games played
                     // (gamesPlayed + gamesOffset) — sort() is stable, so the random pre-shuffle
@@ -1215,8 +1236,10 @@
             let totalNeeded = perTeamInput * 2;
             let chosenPlayers = prioritizedIndices.slice(0, totalNeeded);
     
-            // Randomly divide chosen players between Team 1 and Team 2
-            chosenPlayers.sort(() => Math.random() - 0.5);
+            // Randomly divide chosen players between Team 1 and Team 2. A fair
+            // shuffle matters here: chosenPlayers arrives in priority order, so a
+            // biased one would tend to put similar-priority players on the same team.
+            shuffle(chosenPlayers);
 
             // Store names rather than array indices: indices go stale if the
             // players array is re-sorted (e.g. addPlayer()) before Accept/Copy.
