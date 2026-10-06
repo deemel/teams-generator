@@ -613,7 +613,6 @@
         // unique per roster and never change, so they stay valid.
         let pendingTeam1Names = [];
         let pendingTeam2Names = [];
-        let lastGameIndices = [];
         let gamesHistory = [];
 
         // Bundled together since they're one piece of state ("how the player
@@ -625,8 +624,7 @@
             const state = {
                 roster: currentRoster,
                 players: players,
-                gamesHistory: gamesHistory,
-                lastGameIndices: lastGameIndices
+                gamesHistory: gamesHistory
             };
             localStorage.setItem(STORAGE_KEY_PREFIX + currentRoster, JSON.stringify(state));
             localStorage.setItem(STORAGE_KEY_LAST_ROSTER, currentRoster);
@@ -653,7 +651,6 @@
                         };
                     });
                     gamesHistory = parsed.gamesHistory || [];
-                    lastGameIndices = parsed.lastGameIndices || [];
                     return true;
                 } catch (e) {
                     console.error("Failed to parse stored state:", e);
@@ -859,7 +856,6 @@
             if (!loaded) {
                 let sourceList = getRosterByKey(selectedRoster);
                 players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null }));
-                lastGameIndices = [];
                 gamesHistory = [];
             }
 
@@ -1118,7 +1114,6 @@
 
             let sourceList = getRosterByKey(currentRoster);
             players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null }));
-            lastGameIndices = [];
             pendingTeam1Names = [];
             pendingTeam2Names = [];
             gamesHistory = [];
@@ -1321,11 +1316,6 @@
                     p.gamesPlayed++;
                 }
             });
-
-            // Resolved fresh from names against the current array order
-            lastGameIndices = players
-                .map((p, idx) => selectedNames.has(p.name) ? idx : -1)
-                .filter(idx => idx !== -1);
             renderPlayerList();
 
             // Add to games history with the current date/time as a display
@@ -1346,7 +1336,7 @@
 
         function deleteGame(historyIndex) {
             let game = gamesHistory[historyIndex];
-            
+
             // Decrement games played count for players who were in this game entry
             let allPlayerNames = [...game.team1, ...game.team2];
             allPlayerNames.forEach(name => {
@@ -1358,22 +1348,6 @@
 
             // Remove game entry from history
             gamesHistory.splice(historyIndex, 1);
-
-            // Update lastGameIndices to reflect the most recent remaining game,
-            // or clear if empty
-            if (gamesHistory.length > 0) {
-                // Array position is the authoritative chronological order (see
-                // getSortedHistoryIndices()), so the most recent remaining game
-                // is simply the last element.
-                let mostRecentIdx = gamesHistory.length - 1;
-                let lastGame = gamesHistory[mostRecentIdx];
-                let lastGameNames = [...lastGame.team1, ...lastGame.team2];
-                lastGameIndices = players
-                    .map((p, idx) => lastGameNames.includes(p.name) ? idx : -1)
-                    .filter(idx => idx !== -1);
-            } else {
-                lastGameIndices = [];
-            }
 
             recalculateGamesOffsets();
             renderPlayerList();
