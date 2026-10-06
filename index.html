@@ -512,7 +512,8 @@
                 available: false,
                 checkedIn: false,
                 checkInTimestamp: null,
-                gamesOffset: null
+                gamesOffset: null,
+                gamesAtCheckIn: null
             }));
         }
 
@@ -647,7 +648,11 @@
                             available: p.available || false,
                             checkedIn: p.checkedIn || false,
                             checkInTimestamp: (p.checkInTimestamp === undefined) ? null : p.checkInTimestamp,
-                            gamesOffset: (p.gamesOffset === undefined) ? null : p.gamesOffset
+                            gamesOffset: (p.gamesOffset === undefined) ? null : p.gamesOffset,
+                            // Players checked in before this field existed load as null;
+                            // their offsets are left untouched on game deletion (see
+                            // updateGamesOffsetsAfterDeletion()).
+                            gamesAtCheckIn: (p.gamesAtCheckIn === undefined) ? null : p.gamesAtCheckIn
                         };
                     });
                     gamesHistory = parsed.gamesHistory || [];
@@ -684,35 +689,87 @@
         }
 
         /**
-         * Recalculates gamesOffset for every currently checked-in player, replaying
-         * check-ins in their original chronological order. Each player's offset is
-         * recomputed as the average effective games played of everyone who checked
-         * in before them — using the freshly corrected gamesPlayed data. This keeps
-         * offsets accurate after a game is deleted from history and gamesPlayed
-         * counts are decremented.
-         *
-         * Players whose gamesOffset is currently exactly 0 are pinned there and
-         * skipped for reassignment — they stay at 0 regardless of what the
-         * recalculated average would otherwise be. They still contribute their own
-         * (corrected) effective games played to the running average used for
-         * players who checked in after them.
+         * Records a check-in on a player object: offset snapshot, check-in time,
+         * and how many games were already in history at that moment. Shared by
+         * toggleCheckedIn() and both select-all handlers so all three always
+         * record the same fields.
          */
-        function recalculateGamesOffsets() {
-            let checkedInIndices = players
+        function applyCheckIn(player) {
+            // Computed before setting checkedIn, so the player doesn't count
+            // themselves in the average.
+            player.gamesOffset = computeCurrentAvgOffset();
+            player.checkedIn = true;
+            player.checkInTimestamp = Date.now();
+            player.gamesAtCheckIn = gamesHistory.length;
+        }
+
+        /**
+         * Clears all check-in fields on a player object. Shared by
+         * toggleCheckedIn() and toggleAllCheckedIn().
+         */
+        function applyCheckOut(player) {
+            player.checkedIn = false;
+            player.available = false;
+            player.checkInTimestamp = null;
+            player.gamesOffset = null;
+            player.gamesAtCheckIn = null;
+        }
+
+        /**
+         * A player's effective games played as of the moment the first
+         * `historyCount` games had been recorded. Works backward from their
+         * current gamesPlayed by subtracting the games they appear in after
+         * that point, so manual +/- adjustments made earlier are preserved.
+         */
+        function getEffectiveGamesPlayedAt(player, historyCount) {
+            let gamesSince = 0;
+            for (let i = historyCount; i < gamesHistory.length; i++) {
+                const game = gamesHistory[i];
+                if (game.team1.includes(player.name) || game.team2.includes(player.name)) {
+                    gamesSince++;
+                }
+            }
+            const gamesThen = Math.max(0, player.gamesPlayed - gamesSince);
+            const offset = (player.gamesOffset === null || player.gamesOffset === undefined) ? 0 : player.gamesOffset;
+            return gamesThen + offset;
+        }
+
+        /**
+         * Corrects checked-in players' gamesOffset after the game at
+         * `deletedIndex` has been removed from gamesHistory (and gamesPlayed
+         * counts decremented). Must be called AFTER the splice.
+         *
+         * An offset reflects what everyone else had played at the moment a
+         * player checked in, so:
+         * - If the deleted game came AFTER a player's check-in, their offset is
+         *   unchanged — it couldn't have affected it.
+         * - If it came BEFORE, their gamesAtCheckIn shifts down by one (to keep
+         *   pointing at the same spot in history) and their offset is recomputed
+         *   from what the earlier-checked-in players had played at that point —
+         *   NOT from their current totals, which include later games.
+         *
+         * Players are processed in check-in order so any earlier player whose
+         * offset changes is already corrected before later players use it.
+         * Players with gamesAtCheckIn === null (checked in before this field
+         * existed) are left untouched but still count toward later averages.
+         */
+        function updateGamesOffsetsAfterDeletion(deletedIndex) {
+            const checkedInIndices = players
                 .map((p, idx) => idx)
                 .filter(idx => players[idx].checkedIn)
-                .sort((a, b) => (players[a].checkInTimestamp || 0) - (players[b].checkInTimestamp || 0));
+                .sort((a, b) => ((players[a].checkInTimestamp || 0) - (players[b].checkInTimestamp || 0)) || (a - b));
 
-            let processed = [];
+            const earlier = [];
             checkedInIndices.forEach(idx => {
-                let player = players[idx];
-                if (player.gamesOffset !== 0) {
-                    let avgGames = processed.length > 0
-                        ? Math.floor(processed.reduce((sum, pl) => sum + getEffectiveGamesPlayed(pl), 0) / processed.length)
+                const player = players[idx];
+                if (player.gamesAtCheckIn !== null && deletedIndex < player.gamesAtCheckIn) {
+                    player.gamesAtCheckIn--;
+                    const k = player.gamesAtCheckIn;
+                    player.gamesOffset = earlier.length > 0
+                        ? Math.floor(earlier.reduce((sum, pl) => sum + getEffectiveGamesPlayedAt(pl, k), 0) / earlier.length)
                         : 0;
-                    player.gamesOffset = avgGames;
                 }
-                processed.push(player);
+                earlier.push(player);
             });
         }
 
@@ -855,7 +912,7 @@
 
             if (!loaded) {
                 let sourceList = getRosterByKey(selectedRoster);
-                players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null }));
+                players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null }));
                 gamesHistory = [];
             }
 
@@ -898,11 +955,9 @@
             if (isChecked) {
                 players.forEach((p) => {
                     if (!p.checkedIn) {
-                        // Same logic as toggleCheckedIn(): base the offset on the average
-                        // effective games played of everyone already checked in so far.
-                        p.gamesOffset = computeCurrentAvgOffset();
-                        p.checkedIn = true;
-                        p.checkInTimestamp = Date.now();
+                        // Same as toggleCheckedIn(): the offset is based on everyone
+                        // already checked in so far, including earlier ones in this loop.
+                        applyCheckIn(p);
                     }
                     p.available = true;
                 });
@@ -920,22 +975,15 @@
             if (isChecked) {
                 players.forEach((p) => {
                     if (!p.checkedIn) {
-                        // Same offset logic as toggleCheckedIn()/toggleSelectAllAvailable():
-                        // base it on the average effective games played of everyone
-                        // already checked in so far in this loop.
-                        p.gamesOffset = computeCurrentAvgOffset();
-                        p.checkedIn = true;
-                        p.checkInTimestamp = Date.now();
+                        // Same as toggleCheckedIn()/toggleSelectAllAvailable(): the
+                        // offset is based on everyone already checked in so far,
+                        // including earlier ones in this loop.
+                        applyCheckIn(p);
                     }
                     p.available = true;
                 });
             } else {
-                players.forEach((p) => {
-                    p.checkedIn = false;
-                    p.available = false;
-                    p.checkInTimestamp = null;
-                    p.gamesOffset = null;
-                });
+                players.forEach(applyCheckOut);
             }
 
             renderPlayerList();
@@ -1059,7 +1107,7 @@
                 showAlert(`"${name}" is already on this roster.`);
                 return;
             }
-            players.push({ name: name, gamesPlayed: 0, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null });
+            players.push({ name: name, gamesPlayed: 0, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null });
             players.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'accent' }));
             input.value = '';
             hideAlert();
@@ -1082,17 +1130,12 @@
 
         function toggleCheckedIn(index, isCheckedIn) {
             if (isCheckedIn) {
-                // Record this check-in's games offset snapshot (used as a fairness input during team generation)
-                players[index].gamesOffset = computeCurrentAvgOffset();
-
-                players[index].checkedIn = true;
+                // Records the offset snapshot (a fairness input during team
+                // generation) and the history position used to correct it later.
+                applyCheckIn(players[index]);
                 players[index].available = true;
-                players[index].checkInTimestamp = Date.now();
             } else {
-                players[index].checkedIn = false;
-                players[index].available = false;
-                players[index].checkInTimestamp = null;
-                players[index].gamesOffset = null;
+                applyCheckOut(players[index]);
             }
 
             renderPlayerList();
@@ -1113,7 +1156,7 @@
             localStorage.removeItem(STORAGE_KEY_PREFIX + currentRoster);
 
             let sourceList = getRosterByKey(currentRoster);
-            players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null }));
+            players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null }));
             pendingTeam1Names = [];
             pendingTeam2Names = [];
             gamesHistory = [];
@@ -1384,7 +1427,7 @@
             pendingTeam2Names = [];
             outputCard.style.display = 'none';
 
-            recalculateGamesOffsets();
+            updateGamesOffsetsAfterDeletion(historyIndex);
             renderPlayerList();
             renderHistory();
             saveToLocalStorage();
