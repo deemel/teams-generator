@@ -1,4 +1,10 @@
-const CACHE_NAME = 'teams-tracker-cache-v2';
+// Bump this whenever any cached file changes (index.html, manifest.json,
+// icons, or this file). The new name makes browsers install the new
+// version, and the activate handler below deletes the old cache.
+// It's also what the app shows at the bottom of the page (see the
+// 'message' listener below).
+const CACHE_NAME = 'teams-tracker-cache-v3';
+
 const FILES_TO_CACHE = [
   './',
   './index.html',
@@ -30,6 +36,14 @@ self.addEventListener('activate', (event) => {
     })
   );
   self.clients.claim();
+});
+
+// Replies with this service worker's CACHE_NAME, so the page can show
+// which version is currently serving the app.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'GET_VERSION' && event.ports[0]) {
+    event.ports[0].postMessage(CACHE_NAME);
+  }
 });
 
 self.addEventListener('fetch', (event) => {
