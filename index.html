@@ -699,7 +699,7 @@
         /**
          * Records a check-in on a player object: offset snapshot, check-in time,
          * and how many games were already in history at that moment. Shared by
-         * toggleCheckedIn() and both select-all handlers so all three always
+         * toggleCheckedIn() and checkInAndMarkAllAvailable() so both always
          * record the same fields.
          */
         function applyCheckIn(player) {
@@ -936,38 +936,46 @@
             document.getElementById('playerCountDisplay').innerHTML = `<b>Available:</b> ${availableCount} / ${total}`;
         }
 
+        /**
+         * Checks in everyone not already checked in, and marks everyone available.
+         * Shared by both "select all" header checkboxes, which behave the same way
+         * when checked. Players are checked in one at a time in array order, so
+         * each new offset is based on everyone checked in so far, including
+         * earlier players in this loop (same as checking them in by hand).
+         */
+        function checkInAndMarkAllAvailable() {
+            players.forEach(p => {
+                if (!p.checkedIn) {
+                    applyCheckIn(p);
+                }
+                markAvailable(p);
+            });
+        }
+
+        /**
+         * "Available" header checkbox. Checking it checks in and marks everyone
+         * available; unchecking it marks everyone unavailable but keeps them
+         * checked in.
+         */
         function toggleSelectAllAvailable(isChecked) {
             if (isChecked) {
-                players.forEach((p) => {
-                    if (!p.checkedIn) {
-                        // Same as toggleCheckedIn(): the offset is based on everyone
-                        // already checked in so far, including earlier ones in this loop.
-                        applyCheckIn(p);
-                    }
-                    markAvailable(p);
-                });
+                checkInAndMarkAllAvailable();
             } else {
                 players.forEach(markUnavailable);
             }
-
             renderPlayerList();
         }
 
+        /**
+         * "Checked In" header checkbox. Checking it checks in and marks everyone
+         * available; unchecking it checks everyone out.
+         */
         function toggleAllCheckedIn(isChecked) {
             if (isChecked) {
-                players.forEach((p) => {
-                    if (!p.checkedIn) {
-                        // Same as toggleCheckedIn()/toggleSelectAllAvailable(): the
-                        // offset is based on everyone already checked in so far,
-                        // including earlier ones in this loop.
-                        applyCheckIn(p);
-                    }
-                    markAvailable(p);
-                });
+                checkInAndMarkAllAvailable();
             } else {
                 players.forEach(applyCheckOut);
             }
-
             renderPlayerList();
         }
 
