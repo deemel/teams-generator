@@ -498,15 +498,14 @@
 
     <script>
         /**
-         * Builds a roster's player objects from a flat list of names, applying the
-         * same default shape to every entry. Centralizes the player object shape so
-         * roster definitions can stay compact name lists instead of repeating
-         * gamesPlayed/available/checkedIn/etc. by hand for every single player.
-         * Names are trimmed defensively so stray whitespace in a roster
-         * definition can never cause a false-negative duplicate check later.
+         * Creates a player object with every field at its starting value. The
+         * single source of truth for the player shape: rosters, Reset, and
+         * addPlayer() all build players here, so a new field only needs adding
+         * once. Names are trimmed defensively so stray whitespace can never cause
+         * a false-negative duplicate check in addPlayer().
          */
-        function makeRoster(names) {
-            return names.map(name => ({
+        function createPlayer(name) {
+            return {
                 name: name.trim(),
                 gamesPlayed: 0,
                 available: false,
@@ -515,58 +514,58 @@
                 gamesOffset: null,
                 gamesAtCheckIn: null,
                 availableSince: null
-            }));
+            };
         }
 
-        const empty = makeRoster([]);
+        const empty = [];
 
-        const monday = makeRoster([
+        const monday = [
             "Ah B", "Alex", "Aric", "Benny", "Billy", "Brian", "Chris", "Danny", "Deric", "Eric",
             "Fai", "Francis", "Howard", "Jeffrey", "Joe", "Kelvin", "Kenji", "Kenneth", "Kit", "Kobe",
             "Kyth", "Lok", "Pat", "Raymond", "Ricky", "Sunny", "Timmy", "Travis", "Wayne", "奶仔", "蔡哥"
-        ]);
+        ];
 
-        const tuesday = makeRoster([
+        const tuesday = [
             "Adrian", "Alex", "Alex friend 1", "Andy", "Angel", "Angel Jr", "Danny", "Derek", "Eric", "Eric Jr",
             "Francis", "Jack", "James", "Jason", "JD", "JD friend 1", "JD friend 2", "JD friend 3", "Kevin", "Lam",
             "Mailman", "Randy", "Ray T", "Wing"
-        ]);
+        ];
 
-        const thursday = makeRoster([
+        const thursday = [
             "Benny", "Bing", "Dan Lau", "Danny", "George", "Giles", "Jack", "James", "Jay", "Kenny",
             "Kok Kit Lee", "Kwok", "Michael Leung", "Michael Poon", "Nelson", "Paul", "Peter", "Phil", "Steve", "Tony",
             "Wai Yip Lee", "William", "二少", "建哥", "梁光远", "韓家聲"
-        ]);
+        ];
 
-        const thursdayGlenOaks = makeRoster([
+        const thursdayGlenOaks = [
             "Alex", "Amenophis", "Andrew", "Benghor", "Buddy", "Danny", "David", "Demz", "Devon", "Flippa",
             "Francis", "Fred", "H", "Hing", "Indio", "James", "James Lin", "Jay", "Jimmy", "Joe",
             "JT", "Justin", "Kevin", "KevinBookher", "Kyth", "Li", "Todd", "Tony"
-        ]);
+        ];
 
-        const saturday = makeRoster([
+        const saturday = [
             "Adrian", "Alex", "Amenophis", "Andrew Ng", "Andrew Yu", "Benghor", "Brian", "Buddy", "Corey", "Danny",
             "David", "David Jang", "Demz", "Devon", "Eddie", "Eliezer", "Eric", "Flippa", "Francis", "Fred",
             "G", "Gyu", "H", "Hing", "Indio", "Jabe", "James", "James Lin", "Jason", "Jay",
             "Jim Turvey", "Jimmy", "Joe", "John", "John Kim", "Jon", "Josh", "JT", "Justin", "Kevin",
             "KevinBookher", "Kyth", "Li", "Otari", "Paul", "Rashan", "Ray", "Ricky", "RJ", "Steve",
             "Tasso", "Timothy", "Todd", "Tony"
-        ]);
+        ];
 
-        const sunday = makeRoster([
+        const sunday = [
             "Adrian", "Alex", "Andy", "Angel", "Angel Jr", "Bill", "Daniel", "Danny", "Dofu", "Don",
             "Dong", "Edwin", "Eugene", "Jack", "James", "Jay", "John", "Kasing", "Kent", "Kyo",
             "Mark", "Matthew", "Mike", "Ray", "Randy", "Sit Wong", "Waiho", "Wing", "Yili", "Zai Zai", "梁光远"
-        ]).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'accent' }));
+        ].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'accent' }));
 
-        const stelton = makeRoster([
+        const stelton = [
             "Adi", "Ben", "Brent", "Chad", "Dan", "Danny", "Devin", "Ed", "Giles", "Houdine",
             "Joe", "Joel", "Joey", "Jose", "Keith", "Malik", "Marshall", "Matt", "Mike", "Mike Jr",
             "Pat Lawrence", "Pat Liang", "Phil", "Rafi", "Scott", "Steve Braunstein", "Steve Vlaun", "Troy", "Valeriy"
-        ]);
+        ];
 
         /**
-         * Maps a roster select-option value to its underlying roster array.
+         * Maps a roster select-option value to its list of player names.
          * Falls back to the empty roster for unknown keys.
          */
         function getRosterByKey(key) {
@@ -1086,14 +1085,14 @@
                 showAlert("Player name must be 16 characters or fewer.");
                 return;
             }
-            // "name" is trimmed above and every roster name is trimmed in
-            // makeRoster(), so stray whitespace can't fool this check.
+            // "name" is trimmed above and every player's name is trimmed in
+            // createPlayer(), so stray whitespace can't fool this check.
             const isDuplicate = players.some(p => p.name.localeCompare(name, 'en', { sensitivity: 'accent' }) === 0);
             if (isDuplicate) {
                 showAlert(`"${name}" is already on this roster.`);
                 return;
             }
-            players.push({ name: name, gamesPlayed: 0, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null, availableSince: null });
+            players.push(createPlayer(name));
             players.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'accent' }));
             input.value = '';
             hideAlert();
@@ -1140,17 +1139,16 @@
         }
 
         /**
-         * Starts a fresh session for the currently selected roster: reloads it
-         * from its built-in definition and clears all check-ins, games played,
-         * and history. Runs when the user clicks Reset, and whenever a roster
-         * is selected (from the dropdown or on app startup — see
-         * onRosterSelected()).
+         * Starts a fresh session for the currently selected roster: rebuilds
+         * its players from the roster's name list and clears all check-ins,
+         * games played, and history. Runs when the user clicks Reset, and
+         * whenever a roster is selected (from the dropdown or on app startup —
+         * see onRosterSelected()).
          */
         function resetTracker() {
             const currentRoster = document.getElementById('rosterSelect').value;
 
-            let sourceList = getRosterByKey(currentRoster);
-            players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null, availableSince: null }));
+            players = getRosterByKey(currentRoster).map(name => createPlayer(name));
             pendingTeam1Names = [];
             pendingTeam2Names = [];
             gamesHistory = [];
