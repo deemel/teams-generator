@@ -433,16 +433,8 @@
         <div class="control-row">
             <div class="control-group">
                 <label for="rosterSelect" style="font-weight: bold; color: #333; font-size: 14px;">Roster:</label>
-                <select id="rosterSelect" onchange="onRosterSelected()">
-                    <option value="empty" selected>Custom (Empty)</option>
-                    <option value="monday">Monday</option>
-                    <option value="tuesday">Tuesday</option>
-                    <option value="thursday">Thursday</option>
-                    <option value="thursdayGlenOaks">Thursday Glen Oaks</option>
-                    <option value="saturday">Saturday</option>
-                    <option value="sunday">Sunday</option>
-                    <option value="stelton">Stelton</option>
-                </select>
+                <!-- Options are generated from ROSTERS by renderRosterOptions() -->
+                <select id="rosterSelect" onchange="onRosterSelected()"></select>
                 <span id="todayBadge" class="today-badge">Today</span>
             </div>
 
@@ -543,69 +535,94 @@
             return game.team1.includes(name) || game.team2.includes(name);
         }
 
-        const empty = [];
-
-        const monday = [
-            "Ah B", "Alex", "Aric", "Benny", "Billy", "Brian", "Chris", "Danny", "Deric", "Eric",
-            "Fai", "Francis", "Howard", "Jeffrey", "Joe", "Kelvin", "Kenji", "Kenneth", "Kit", "Kobe",
-            "Kyth", "Lok", "Pat", "Raymond", "Ricky", "Sunny", "Timmy", "Travis", "Wayne", "奶仔", "蔡哥"
-        ];
-
-        const tuesday = [
-            "Adrian", "Alex", "Alex friend 1", "Andy", "Angel", "Angel Jr", "Danny", "Derek", "Eric", "Eric Jr",
-            "Francis", "Jack", "James", "Jason", "JD", "JD friend 1", "JD friend 2", "JD friend 3", "Kevin", "Lam",
-            "Mailman", "Randy", "Ray T", "Wing"
-        ];
-
-        const thursday = [
-            "Benny", "Bing", "Dan Lau", "Danny", "George", "Giles", "Jack", "James", "Jay", "Kenny",
-            "Kok Kit Lee", "Kwok", "Michael Leung", "Michael Poon", "Nelson", "Paul", "Peter", "Phil", "Steve", "Tony",
-            "Wai Yip Lee", "William", "二少", "建哥", "梁光远", "韓家聲"
-        ];
-
-        const thursdayGlenOaks = [
-            "Alex", "Amenophis", "Andrew", "Benghor", "Buddy", "Danny", "David", "Demz", "Devon", "Flippa",
-            "Francis", "Fred", "H", "Hing", "Indio", "James", "James Lin", "Jay", "Jimmy", "Joe",
-            "JT", "Justin", "Kevin", "KevinBookher", "Kyth", "Li", "Todd", "Tony"
-        ];
-
-        const saturday = [
-            "Adrian", "Alex", "Amenophis", "Andrew Ng", "Andrew Yu", "Benghor", "Brian", "Buddy", "Corey", "Danny",
-            "David", "David Jang", "Demz", "Devon", "Eddie", "Eliezer", "Eric", "Flippa", "Francis", "Fred",
-            "G", "Gyu", "H", "Hing", "Indio", "Jabe", "James", "James Lin", "Jason", "Jay",
-            "Jim Turvey", "Jimmy", "Joe", "John", "John Kim", "Jon", "Josh", "JT", "Justin", "Kevin",
-            "KevinBookher", "Kyth", "Li", "Otari", "Paul", "Rashan", "Ray", "Ricky", "RJ", "Steve",
-            "Tasso", "Timothy", "Todd", "Tony"
-        ];
-
-        const sunday = [
-            "Adrian", "Alex", "Andy", "Angel", "Angel Jr", "Bill", "Daniel", "Danny", "Dofu", "Don",
-            "Dong", "Edwin", "Eugene", "Jack", "James", "Jay", "John", "Kasing", "Kent", "Kyo",
-            "Mark", "Matthew", "Mike", "Ray", "Randy", "Sit Wong", "Waiho", "Wing", "Yili", "Zai Zai", "梁光远"
-        ].sort(compareNames);
-
-        const stelton = [
-            "Adi", "Ben", "Brent", "Chad", "Dan", "Danny", "Devin", "Ed", "Giles", "Houdine",
-            "Joe", "Joel", "Joey", "Jose", "Keith", "Malik", "Marshall", "Matt", "Mike", "Mike Jr",
-            "Pat Lawrence", "Pat Liang", "Phil", "Rafi", "Scott", "Steve Braunstein", "Steve Vlaun", "Troy", "Valeriy"
-        ];
+        /**
+         * Every roster the app offers, in dropdown order. The single place to add,
+         * rename, reorder, or remove a roster: the dropdown (renderRosterOptions())
+         * and Reset (getRosterNames()) are both built from this. Keys must match
+         * those used in ROSTER_KEY_BY_DAY_OF_WEEK.
+         */
+        const ROSTERS = {
+            empty: {
+                label: "Custom (Empty)",
+                names: []
+            },
+            monday: {
+                label: "Monday",
+                names: [
+                    "Ah B", "Alex", "Aric", "Benny", "Billy", "Brian", "Chris", "Danny", "Deric", "Eric",
+                    "Fai", "Francis", "Howard", "Jeffrey", "Joe", "Kelvin", "Kenji", "Kenneth", "Kit", "Kobe",
+                    "Kyth", "Lok", "Pat", "Raymond", "Ricky", "Sunny", "Timmy", "Travis", "Wayne", "奶仔", "蔡哥"
+                ]
+            },
+            tuesday: {
+                label: "Tuesday",
+                names: [
+                    "Adrian", "Alex", "Alex friend 1", "Andy", "Angel", "Angel Jr", "Danny", "Derek", "Eric", "Eric Jr",
+                    "Francis", "Jack", "James", "Jason", "JD", "JD friend 1", "JD friend 2", "JD friend 3", "Kevin", "Lam",
+                    "Mailman", "Randy", "Ray T", "Wing"
+                ]
+            },
+            thursday: {
+                label: "Thursday",
+                names: [
+                    "Benny", "Bing", "Dan Lau", "Danny", "George", "Giles", "Jack", "James", "Jay", "Kenny",
+                    "Kok Kit Lee", "Kwok", "Michael Leung", "Michael Poon", "Nelson", "Paul", "Peter", "Phil", "Steve", "Tony",
+                    "Wai Yip Lee", "William", "二少", "建哥", "梁光远", "韓家聲"
+                ]
+            },
+            thursdayGlenOaks: {
+                label: "Thursday Glen Oaks",
+                names: [
+                    "Alex", "Amenophis", "Andrew", "Benghor", "Buddy", "Danny", "David", "Demz", "Devon", "Flippa",
+                    "Francis", "Fred", "H", "Hing", "Indio", "James", "James Lin", "Jay", "Jimmy", "Joe",
+                    "JT", "Justin", "Kevin", "KevinBookher", "Kyth", "Li", "Todd", "Tony"
+                ]
+            },
+            saturday: {
+                label: "Saturday",
+                names: [
+                    "Adrian", "Alex", "Amenophis", "Andrew Ng", "Andrew Yu", "Benghor", "Brian", "Buddy", "Corey", "Danny",
+                    "David", "David Jang", "Demz", "Devon", "Eddie", "Eliezer", "Eric", "Flippa", "Francis", "Fred",
+                    "G", "Gyu", "H", "Hing", "Indio", "Jabe", "James", "James Lin", "Jason", "Jay",
+                    "Jim Turvey", "Jimmy", "Joe", "John", "John Kim", "Jon", "Josh", "JT", "Justin", "Kevin",
+                    "KevinBookher", "Kyth", "Li", "Otari", "Paul", "Rashan", "Ray", "Ricky", "RJ", "Steve",
+                    "Tasso", "Timothy", "Todd", "Tony"
+                ]
+            },
+            sunday: {
+                label: "Sunday",
+                names: [
+                    "Adrian", "Alex", "Andy", "Angel", "Angel Jr", "Bill", "Daniel", "Danny", "Dofu", "Don",
+                    "Dong", "Edwin", "Eugene", "Jack", "James", "Jay", "John", "Kasing", "Kent", "Kyo",
+                    "Mark", "Matthew", "Mike", "Ray", "Randy", "Sit Wong", "Waiho", "Wing", "Yili", "Zai Zai", "梁光远"
+                ].sort(compareNames)
+            },
+            stelton: {
+                label: "Stelton",
+                names: [
+                    "Adi", "Ben", "Brent", "Chad", "Dan", "Danny", "Devin", "Ed", "Giles", "Houdine",
+                    "Joe", "Joel", "Joey", "Jose", "Keith", "Malik", "Marshall", "Matt", "Mike", "Mike Jr",
+                    "Pat Lawrence", "Pat Liang", "Phil", "Rafi", "Scott", "Steve Braunstein", "Steve Vlaun", "Troy", "Valeriy"
+                ]
+            }
+        };
 
         /**
-         * Maps a roster select-option value to its list of player names.
-         * Falls back to the empty roster for unknown keys.
+         * Returns the player names for a roster key, falling back to the empty
+         * roster for unknown keys.
          */
-        function getRosterByKey(key) {
-            const rosterMap = {
-                empty: empty,
-                monday: monday,
-                tuesday: tuesday,
-                thursday: thursday,
-                thursdayGlenOaks: thursdayGlenOaks,
-                saturday: saturday,
-                sunday: sunday,
-                stelton: stelton
-            };
-            return rosterMap[key] || empty;
+        function getRosterNames(key) {
+            return (ROSTERS[key] || ROSTERS.empty).names;
+        }
+
+        /**
+         * Fills the roster dropdown from ROSTERS, in its key order. Called once
+         * at startup, before the initial roster is selected.
+         */
+        function renderRosterOptions() {
+            document.getElementById('rosterSelect').innerHTML = Object.entries(ROSTERS)
+                .map(([key, roster]) => `<option value="${escapeHtml(key)}">${escapeHtml(roster.label)}</option>`)
+                .join('');
         }
 
         // Index i = Date.getDay() result (0 = Sunday ... 6 = Saturday). null marks
@@ -1150,7 +1167,7 @@
         function resetTracker() {
             const currentRoster = document.getElementById('rosterSelect').value;
 
-            players = getRosterByKey(currentRoster).map(name => createPlayer(name));
+            players = getRosterNames(currentRoster).map(name => createPlayer(name));
             pendingTeam1Names = [];
             pendingTeam2Names = [];
             gamesHistory = [];
@@ -1570,11 +1587,12 @@
             }).join('');
         }
 
-        // Initialize on page load: clear any state older versions saved, then
-        // start fresh with today's roster, or the empty Custom roster on days
-        // without one. onRosterSelected() does exactly what happens when a
-        // roster is picked from the dropdown.
+        // Initialize on page load: clear any state older versions saved, build
+        // the roster dropdown, then start fresh with today's roster, or the
+        // empty Custom roster on days without one. onRosterSelected() does
+        // exactly what happens when a roster is picked from the dropdown.
         clearLegacySavedState();
+        renderRosterOptions();
         document.getElementById('rosterSelect').value = getDefaultRosterKeyForToday() || 'empty';
         onRosterSelected();
     </script>
