@@ -1250,126 +1250,103 @@
             return best;
         }
 
-        function generateTeams() {
-            hideAlert();
-    
-            // 1. Read input configuration
-            let perTeamInput = parseInt(document.getElementById('playersPerTeamInput').value);
-            if (isNaN(perTeamInput) || perTeamInput < 1) {
-                showAlert("Please enter a valid number of players per team!");
-                return;
+        // ---- Team selection ------------------------------------------------
+
+        /**
+         * Streak score for a player. Counts only games played since they last
+         * became available (see markAvailable()), so latecomers and players
+         * returning from a rest start at 0 instead of being credited with
+         * sit-outs for games they weren't there for.
+         * - NEGATIVE = consecutive games SAT OUT (e.g., -2 = sat out 2 straight games).
+         * - POSITIVE = consecutive games PLAYED (e.g., +2 = played 2 straight games).
+         * - 0 = no games played since they became available.
+         */
+        function getStreakScore(player) {
+            const relevantGames = gamesHistory.slice(player.availableSince);
+            if (relevantGames.length === 0) return 0;
+
+            const playedLast = playedIn(relevantGames[relevantGames.length - 1], player.name);
+
+            let streak = 0;
+            for (let i = relevantGames.length - 1; i >= 0; i--) {
+                if (playedIn(relevantGames[i], player.name) === playedLast) {
+                    streak++;
+                } else {
+                    break;
+                }
             }
 
-            // 2. Filter for available players
-            let selectedIndices = [];
-            players.forEach((p, index) => {
-                if (p.available) {
-                    selectedIndices.push(index);
-                }
+            return playedLast ? streak : -streak;
+        }
+
+        /**
+         * Decides WHO plays next: returns the names of the `count` highest-priority
+         * available players. All the fairness rules for selection live here:
+         * 1. Streak tier first: longest sit-out streak (most negative score) wins.
+         * 2. Within a tier, fewest effective games played (gamesPlayed + gamesOffset).
+         * 3. Exact ties are broken randomly: each tier is shuffled before the
+         *    stable sort, so tied players keep that random order.
+         * Callers must ensure at least `count` players are available.
+         */
+        function selectPlayers(count) {
+            const tiers = {};
+            players.filter(p => p.available).forEach(p => {
+                const score = getStreakScore(p);
+                if (!tiers[score]) tiers[score] = [];
+                tiers[score].push(p);
             });
 
-            let requiredTotal = perTeamInput * 2;
-            if (selectedIndices.length < requiredTotal) {
-                showAlert(`Please select at least ${requiredTotal} available players to form two ${perTeamInput}-player teams!`);
-                return;
-            }
-
-            /**
-             * Streak Score Helper. Counts only games played since this player
-             * last became available (see markAvailable()), so latecomers and players
-             * returning from a rest start at 0 instead of being credited with sit-outs
-             * for games they weren't there for.
-             * - Returns a NEGATIVE number for consecutive games SAT OUT (e.g., -2 = sat out 2 straight games).
-             * - Returns a POSITIVE number for consecutive games PLAYED (e.g., +2 = played 2 straight games).
-             * - Returns 0 if no games have been played since they became available.
-             */
-            function getStreakScore(playerIndex) {
-                const player = players[playerIndex];
-                const relevantGames = gamesHistory.slice(player.availableSince);
-                if (relevantGames.length === 0) return 0;
-
-                // Check last game played state
-                const playedLast = playedIn(relevantGames[relevantGames.length - 1], player.name);
-
-                let streak = 0;
-                for (let i = relevantGames.length - 1; i >= 0; i--) {
-                    if (playedIn(relevantGames[i], player.name) === playedLast) {
-                        streak++;
-                    } else {
-                        break;
-                    }
-                }
-
-                return playedLast ? streak : -streak;
-            }
-
-            // 3. Group players by their exact streak score
-            let groupedMap = {};
-            selectedIndices.forEach(i => {
-                let score = getStreakScore(i);
-                if (!groupedMap[score]) groupedMap[score] = [];
-                groupedMap[score].push(i);
-            });
-
-            // 4. Sort groups ascending (most negative scores first = highest priority)
-            let prioritizedIndices = [];
-            Object.keys(groupedMap)
+            const prioritized = Object.keys(tiers)
                 .map(Number)
                 .sort((a, b) => a - b)
-                .forEach(score => {
-                    let group = groupedMap[score];
+                .flatMap(score => shuffle(tiers[score])
+                    .sort((a, b) => getEffectiveGamesPlayed(a) - getEffectiveGamesPlayed(b)));
 
-                    // Pre-shuffle so any exact ties in effective games played land
-                    // in a genuinely random order (see shuffle() for why this isn't
-                    // done with sort())
-                    shuffle(group);
+            return prioritized.slice(0, count).map(p => p.name);
+        }
 
-                    // Within each streak tier, prioritize players with fewer effective games played
-                    // (gamesPlayed + gamesOffset) — sort() is stable, so the random pre-shuffle
-                    // above still governs exact ties
-                    group.sort((a, b) => getEffectiveGamesPlayed(players[a]) - getEffectiveGamesPlayed(players[b]));
-
-                    prioritizedIndices.push(...group);
-                });
-
-            // 5. Select the top required players (fairness decides WHO plays)...
-            let totalNeeded = perTeamInput * 2;
-            let chosenNames = prioritizedIndices.slice(0, totalNeeded).map(i => players[i].name);
-
-            // ...then split them into teams, avoiding repeat teammate groups
-            // from earlier this session (see findBestSplit()). Names, not
-            // indices, are stored — indices go stale if the players array is
-            // re-sorted before Accept/Copy.
-            const split = findBestSplit(chosenNames, perTeamInput);
-
-            // Sorted alphabetically for visual presentation.
-            pendingTeam1Names = split.team1.sort(compareNames);
-            pendingTeam2Names = split.team2.sort(compareNames);
-
-            // 6. Update UI
-            const team1List = document.getElementById('team1List');
-            const team2List = document.getElementById('team2List');
-    
-            team1List.innerHTML = '';
-            team2List.innerHTML = '';
-
-            pendingTeam1Names.forEach(name => {
-                let li = document.createElement('li');
-                li.textContent = name;
-                team1List.appendChild(li);
-            });
-
-            pendingTeam2Names.forEach(name => {
-                let li = document.createElement('li');
-                li.textContent = name;
-                team2List.appendChild(li);
-            });
+        /**
+         * Shows the pending teams in the preview card and re-enables Accept.
+         */
+        function renderTeamsPreview() {
+            const toListHtml = names => names.map(name => `<li>${escapeHtml(name)}</li>`).join('');
+            document.getElementById('team1List').innerHTML = toListHtml(pendingTeam1Names);
+            document.getElementById('team2List').innerHTML = toListHtml(pendingTeam2Names);
 
             const acceptBtn = document.getElementById('acceptBtn');
             acceptBtn.disabled = false;
             acceptBtn.textContent = "Accept Teams & Update Games Played";
 
             document.getElementById('outputCard').style.display = 'block';
+        }
+
+        /**
+         * Generate button handler: validates input, picks who plays
+         * (selectPlayers()), splits them into teams (findBestSplit()), and shows
+         * the preview.
+         */
+        function generateTeams() {
+            hideAlert();
+
+            const perTeam = parseInt(document.getElementById('playersPerTeamInput').value);
+            if (isNaN(perTeam) || perTeam < 1) {
+                showAlert("Please enter a valid number of players per team!");
+                return;
+            }
+
+            const requiredTotal = perTeam * 2;
+            if (players.filter(p => p.available).length < requiredTotal) {
+                showAlert(`Please select at least ${requiredTotal} available players to form two ${perTeam}-player teams!`);
+                return;
+            }
+
+            // Names, not indices, are stored — indices go stale if the players
+            // array is re-sorted before Accept/Copy.
+            const split = findBestSplit(selectPlayers(requiredTotal), perTeam);
+            pendingTeam1Names = split.team1.sort(compareNames);  // alphabetical for display
+            pendingTeam2Names = split.team2.sort(compareNames);
+
+            renderTeamsPreview();
 
             if (split.penalty > 0) {
                 showAlert(`Couldn't fully avoid repeating a group of ${REPEAT_GROUP_SIZE}+ teammates from earlier this session with these players, so the split with the least overlap was used.`);
