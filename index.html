@@ -517,6 +517,32 @@
             };
         }
 
+        /**
+         * Compares two player names for sorting and duplicate checks. The one
+         * place the comparison rule is defined: case-insensitive but
+         * accent-sensitive ("alex" equals "Alex", "José" doesn't equal "Jose").
+         * A function declaration (not a const arrow) so it's usable by the
+         * roster sorts below, which run before this point in the script.
+         */
+        function compareNames(a, b) {
+            return a.localeCompare(b, 'en', { sensitivity: 'accent' });
+        }
+
+        /**
+         * A player's games offset for fairness math, treating "not checked in"
+         * (null) as 0.
+         */
+        function getOffset(player) {
+            return player.gamesOffset ?? 0;
+        }
+
+        /**
+         * Whether the named player was on either team in the given game.
+         */
+        function playedIn(game, name) {
+            return game.team1.includes(name) || game.team2.includes(name);
+        }
+
         const empty = [];
 
         const monday = [
@@ -556,7 +582,7 @@
             "Adrian", "Alex", "Andy", "Angel", "Angel Jr", "Bill", "Daniel", "Danny", "Dofu", "Don",
             "Dong", "Edwin", "Eugene", "Jack", "James", "Jay", "John", "Kasing", "Kent", "Kyo",
             "Mark", "Matthew", "Mike", "Ray", "Randy", "Sit Wong", "Waiho", "Wing", "Yili", "Zai Zai", "梁光远"
-        ].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'accent' }));
+        ].sort(compareNames);
 
         const stelton = [
             "Adi", "Ben", "Brent", "Chad", "Dan", "Danny", "Devin", "Ed", "Giles", "Houdine",
@@ -639,8 +665,7 @@
          * the fairness basis for both the check-in average calculation and team generation.
          */
         function getEffectiveGamesPlayed(player) {
-            let offset = (player.gamesOffset === null || player.gamesOffset === undefined) ? 0 : player.gamesOffset;
-            return player.gamesPlayed + offset;
+            return player.gamesPlayed + getOffset(player);
         }
 
         /**
@@ -727,16 +752,9 @@
          * that point, so manual +/- adjustments made earlier are preserved.
          */
         function getEffectiveGamesPlayedAt(player, historyCount) {
-            let gamesSince = 0;
-            for (let i = historyCount; i < gamesHistory.length; i++) {
-                const game = gamesHistory[i];
-                if (game.team1.includes(player.name) || game.team2.includes(player.name)) {
-                    gamesSince++;
-                }
-            }
+            const gamesSince = gamesHistory.slice(historyCount).filter(game => playedIn(game, player.name)).length;
             const gamesThen = Math.max(0, player.gamesPlayed - gamesSince);
-            const offset = (player.gamesOffset === null || player.gamesOffset === undefined) ? 0 : player.gamesOffset;
-            return gamesThen + offset;
+            return gamesThen + getOffset(player);
         }
 
         /**
@@ -840,7 +858,7 @@
             let indices = players.map((_, idx) => idx);
 
             if (playerSort.column === 'name') {
-                indices.sort((a, b) => players[a].name.localeCompare(players[b].name, 'en', { sensitivity: 'accent' }));
+                indices.sort((a, b) => compareNames(players[a].name, players[b].name));
             } else if (playerSort.column === 'checkedIn') {
                 indices.sort((a, b) => {
                     let minutesA = getCheckInMinutes(players[a].checkInTimestamp);
@@ -854,19 +872,19 @@
                     // sort direction. Since the whole array gets reversed below when
                     // playerSort.direction is 'desc', negate the comparison here so it
                     // lands back in A→Z order after that reversal.
-                    let nameCompare = players[a].name.localeCompare(players[b].name, 'en', { sensitivity: 'accent' });
+                    let nameCompare = compareNames(players[a].name, players[b].name);
                     return playerSort.direction === 'desc' ? -nameCompare : nameCompare;
                 });
             } else if (playerSort.column === 'gamesOffset') {
                 indices.sort((a, b) => {
-                    let offsetA = (players[a].gamesOffset === null || players[a].gamesOffset === undefined) ? -1 : players[a].gamesOffset;
-                    let offsetB = (players[b].gamesOffset === null || players[b].gamesOffset === undefined) ? -1 : players[b].gamesOffset;
+                    let offsetA = players[a].gamesOffset ?? -1;
+                    let offsetB = players[b].gamesOffset ?? -1;
                     if (offsetA !== offsetB) {
                         return offsetA - offsetB;
                     }
                     // Name tiebreaker always reads A→Z regardless of column
                     // sort direction — see the same pattern in the checkedIn branch above.
-                    let nameCompare = players[a].name.localeCompare(players[b].name, 'en', { sensitivity: 'accent' });
+                    let nameCompare = compareNames(players[a].name, players[b].name);
                     return playerSort.direction === 'desc' ? -nameCompare : nameCompare;
                 });
             } else if (playerSort.column === 'gamesPlayed') {
@@ -877,7 +895,7 @@
                     // Name tiebreaker always reads A→Z regardless of column
                     // sort direction — see the same pattern in the checkedIn and
                     // gamesOffset branches above.
-                    let nameCompare = players[a].name.localeCompare(players[b].name, 'en', { sensitivity: 'accent' });
+                    let nameCompare = compareNames(players[a].name, players[b].name);
                     return playerSort.direction === 'desc' ? -nameCompare : nameCompare;
                 });
             }
@@ -1003,7 +1021,7 @@
                 let checkInTimeHtml = (p.checkedIn && p.checkInTimestamp)
                     ? `<span class="checkin-time">${escapeHtml(formatCheckInTime(p.checkInTimestamp))}</span>`
                     : '';
-                let offsetText = (p.gamesOffset === null || p.gamesOffset === undefined) ? '-' : p.gamesOffset;
+                let offsetText = p.gamesOffset ?? '-';
 
                 return `
                     <div class="player-item">
@@ -1087,13 +1105,13 @@
             }
             // "name" is trimmed above and every player's name is trimmed in
             // createPlayer(), so stray whitespace can't fool this check.
-            const isDuplicate = players.some(p => p.name.localeCompare(name, 'en', { sensitivity: 'accent' }) === 0);
+            const isDuplicate = players.some(p => compareNames(p.name, name) === 0);
             if (isDuplicate) {
                 showAlert(`"${name}" is already on this roster.`);
                 return;
             }
             players.push(createPlayer(name));
-            players.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'accent' }));
+            players.sort((a, b) => compareNames(a.name, b.name));
             input.value = '';
             hideAlert();
             renderPlayerList();
@@ -1295,15 +1313,11 @@
                 if (relevantGames.length === 0) return 0;
 
                 // Check last game played state
-                const lastGame = relevantGames[relevantGames.length - 1];
-                const playedLast = lastGame.team1.includes(player.name) || lastGame.team2.includes(player.name);
+                const playedLast = playedIn(relevantGames[relevantGames.length - 1], player.name);
 
                 let streak = 0;
                 for (let i = relevantGames.length - 1; i >= 0; i--) {
-                    const game = relevantGames[i];
-                    const playedInGame = game.team1.includes(player.name) || game.team2.includes(player.name);
-
-                    if (playedInGame === playedLast) {
+                    if (playedIn(relevantGames[i], player.name) === playedLast) {
                         streak++;
                     } else {
                         break;
@@ -1353,9 +1367,8 @@
             const split = findBestSplit(chosenNames, perTeamInput);
 
             // Sorted alphabetically for visual presentation.
-            const byName = (a, b) => a.localeCompare(b, 'en', { sensitivity: 'accent' });
-            pendingTeam1Names = split.team1.sort(byName);
-            pendingTeam2Names = split.team2.sort(byName);
+            pendingTeam1Names = split.team1.sort(compareNames);
+            pendingTeam2Names = split.team2.sort(compareNames);
 
             // 6. Update UI
             const team1List = document.getElementById('team1List');
