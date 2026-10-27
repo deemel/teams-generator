@@ -854,57 +854,33 @@
             renderPlayerList();
         }
 
+        // For each numeric sort column, the value players are compared by.
+        // Players without a value (not checked in) get -1, so they sort as lower
+        // than anyone who has one.
+        const SORT_KEYS = {
+            checkedIn:   p => getCheckInMinutes(p.checkInTimestamp) ?? -1,
+            gamesOffset: p => p.gamesOffset ?? -1,
+            gamesPlayed: p => p.gamesPlayed
+        };
+
+        /**
+         * Returns player indices in the current display order (see playerSort).
+         * The name column sorts by name in the chosen direction. Numeric columns
+         * sort by their SORT_KEYS value in the chosen direction, and ties are
+         * always broken by name A→Z, whatever the direction.
+         */
         function getSortedPlayerIndices() {
-            let indices = players.map((_, idx) => idx);
+            const dir = playerSort.direction === 'asc' ? 1 : -1;
+            const getKey = SORT_KEYS[playerSort.column];
 
-            if (playerSort.column === 'name') {
-                indices.sort((a, b) => compareNames(players[a].name, players[b].name));
-            } else if (playerSort.column === 'checkedIn') {
-                indices.sort((a, b) => {
-                    let minutesA = getCheckInMinutes(players[a].checkInTimestamp);
-                    let minutesB = getCheckInMinutes(players[b].checkInTimestamp);
-                    if (minutesA === null) minutesA = -1;
-                    if (minutesB === null) minutesB = -1;
-                    if (minutesA !== minutesB) {
-                        return minutesA - minutesB;
-                    }
-                    // Name tiebreaker always reads A→Z regardless of column
-                    // sort direction. Since the whole array gets reversed below when
-                    // playerSort.direction is 'desc', negate the comparison here so it
-                    // lands back in A→Z order after that reversal.
-                    let nameCompare = compareNames(players[a].name, players[b].name);
-                    return playerSort.direction === 'desc' ? -nameCompare : nameCompare;
-                });
-            } else if (playerSort.column === 'gamesOffset') {
-                indices.sort((a, b) => {
-                    let offsetA = players[a].gamesOffset ?? -1;
-                    let offsetB = players[b].gamesOffset ?? -1;
-                    if (offsetA !== offsetB) {
-                        return offsetA - offsetB;
-                    }
-                    // Name tiebreaker always reads A→Z regardless of column
-                    // sort direction — see the same pattern in the checkedIn branch above.
-                    let nameCompare = compareNames(players[a].name, players[b].name);
-                    return playerSort.direction === 'desc' ? -nameCompare : nameCompare;
-                });
-            } else if (playerSort.column === 'gamesPlayed') {
-                indices.sort((a, b) => {
-                    if (players[a].gamesPlayed !== players[b].gamesPlayed) {
-                        return players[a].gamesPlayed - players[b].gamesPlayed;
-                    }
-                    // Name tiebreaker always reads A→Z regardless of column
-                    // sort direction — see the same pattern in the checkedIn and
-                    // gamesOffset branches above.
-                    let nameCompare = compareNames(players[a].name, players[b].name);
-                    return playerSort.direction === 'desc' ? -nameCompare : nameCompare;
-                });
-            }
-
-            if (playerSort.direction === 'desc') {
-                indices.reverse();
-            }
-
-            return indices;
+            return players.map((_, idx) => idx).sort((a, b) => {
+                const nameCompare = compareNames(players[a].name, players[b].name);
+                if (!getKey) {
+                    return nameCompare * dir;
+                }
+                const diff = getKey(players[a]) - getKey(players[b]);
+                return diff !== 0 ? diff * dir : nameCompare;
+            });
         }
 
         /**
