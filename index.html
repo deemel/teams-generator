@@ -567,9 +567,7 @@
 
         /**
          * Maps a roster select-option value to its underlying roster array.
-         * Single source of truth for this lookup — used by both switchRoster()
-         * and resetTracker() so the two never drift out of sync with each other
-         * or with the <select> options in the HTML.
+         * Falls back to the empty roster for unknown keys.
          */
         function getRosterByKey(key) {
             const rosterMap = {
@@ -586,8 +584,8 @@
         }
 
         // Index i = Date.getDay() result (0 = Sunday ... 6 = Saturday). null marks
-        // days with no associated roster (Wednesday, Friday), so
-        // getDefaultRosterKeyForToday() falls back to the last saved roster.
+        // days with no associated roster (Wednesday, Friday), so startup falls
+        // back to the empty Custom roster.
         // Thursday has two rosters (thursday, thursdayGlenOaks) — 'thursday' is the default.
         const ROSTER_KEY_BY_DAY_OF_WEEK = [
             'sunday', 'monday', 'tuesday', null, 'thursday', null, 'saturday'
@@ -596,19 +594,34 @@
         /**
          * Maps today's day of the week to a roster key, so the app can default
          * to "today's roster" on load. Returns null for days with no
-         * associated roster, so the caller can fall back to the last saved
-         * roster instead.
+         * associated roster, so startup falls back to the empty Custom roster.
          */
         function getDefaultRosterKeyForToday() {
             return ROSTER_KEY_BY_DAY_OF_WEEK[new Date().getDay()] || null;
         }
 
-        // localStorage key prefixes/names — centralized here so every read/write
-        // uses the exact same string, with no risk of a typo causing a silent mismatch.
-        const STORAGE_KEY_PREFIX = 'teams_tracker_state_';
-        const STORAGE_KEY_LAST_ROSTER = 'teams_tracker_last_roster';
+        // The app keeps nothing between loads. Older versions saved session state
+        // and the last-used roster under keys with this prefix;
+        // clearLegacySavedState() removes any left behind.
+        const LEGACY_STORAGE_KEY_PREFIX = 'teams_tracker_';
 
-        let players = empty.map(p => ({ ...p }));
+        /**
+         * Removes state saved by older versions of the app. Keys are collected
+         * first, since removing items while iterating localStorage by index
+         * would shift the remaining indices.
+         */
+        function clearLegacySavedState() {
+            const legacyKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(LEGACY_STORAGE_KEY_PREFIX)) {
+                    legacyKeys.push(key);
+                }
+            }
+            legacyKeys.forEach(key => localStorage.removeItem(key));
+        }
+
+        let players = [];
         // Previewed teams are stored by player NAME, not by index into the
         // players array. Indices go stale whenever that array is re-sorted
         // (e.g. addPlayer()) between Generate and Accept/Copy; names are
@@ -620,55 +633,6 @@
         // Bundled together since they're one piece of state ("how the player
         // list is currently sorted") rather than two independent values.
         let playerSort = { column: 'name', direction: 'asc' };
-
-        function saveToLocalStorage() {
-            const currentRoster = document.getElementById('rosterSelect').value;
-            const state = {
-                roster: currentRoster,
-                players: players,
-                gamesHistory: gamesHistory
-            };
-            localStorage.setItem(STORAGE_KEY_PREFIX + currentRoster, JSON.stringify(state));
-            localStorage.setItem(STORAGE_KEY_LAST_ROSTER, currentRoster);
-        }
-
-        function loadFromLocalStorage(rosterKey) {
-            const savedState = localStorage.getItem(STORAGE_KEY_PREFIX + rosterKey);
-            if (savedState) {
-                try {
-                    const parsed = JSON.parse(savedState);
-                    players = (parsed.players || []).map(p => {
-                        // Migrate legacy "games" key to "gamesPlayed" for data saved before this rename
-                        let migratedGamesPlayed = (p.gamesPlayed !== undefined) ? p.gamesPlayed : (p.games || 0);
-                        return {
-                            // Trimmed defensively — see makeRoster()'s comment; keeps
-                            // the duplicate-name check in addPlayer() reliable even
-                            // for data saved before this trimming was added.
-                            name: (p.name || '').trim(),
-                            gamesPlayed: migratedGamesPlayed,
-                            available: p.available || false,
-                            checkedIn: p.checkedIn || false,
-                            checkInTimestamp: (p.checkInTimestamp === undefined) ? null : p.checkInTimestamp,
-                            gamesOffset: (p.gamesOffset === undefined) ? null : p.gamesOffset,
-                            // Players checked in before this field existed load as null;
-                            // their offsets are left untouched on game deletion (see
-                            // updateGamesOffsetsAfterDeletion()).
-                            gamesAtCheckIn: (p.gamesAtCheckIn === undefined) ? null : p.gamesAtCheckIn,
-                            // History position where this player's current availability
-                            // began (see markAvailable()). null for data saved before this
-                            // field existed, which makes getStreakScore() fall back to all
-                            // of today's games.
-                            availableSince: (p.availableSince === undefined) ? null : p.availableSince
-                        };
-                    });
-                    gamesHistory = parsed.gamesHistory || [];
-                    return true;
-                } catch (e) {
-                    console.error("Failed to parse stored state:", e);
-                }
-            }
-            return false;
-        }
 
         /**
          * Effective Games Played: a player's raw gamesPlayed plus their gamesOffset
@@ -792,19 +756,17 @@
          *
          * Players are processed in check-in order so any earlier player whose
          * offset changes is already corrected before later players use it.
-         * Players with gamesAtCheckIn === null (checked in before this field
-         * existed) are left untouched but still count toward later averages.
          */
         function updateGamesOffsetsAfterDeletion(deletedIndex) {
             const checkedInIndices = players
                 .map((p, idx) => idx)
                 .filter(idx => players[idx].checkedIn)
-                .sort((a, b) => ((players[a].checkInTimestamp || 0) - (players[b].checkInTimestamp || 0)) || (a - b));
+                .sort((a, b) => (players[a].checkInTimestamp - players[b].checkInTimestamp) || (a - b));
 
             const earlier = [];
             checkedInIndices.forEach(idx => {
                 const player = players[idx];
-                if (player.gamesAtCheckIn !== null && deletedIndex < player.gamesAtCheckIn) {
+                if (deletedIndex < player.gamesAtCheckIn) {
                     player.gamesAtCheckIn--;
                     const k = player.gamesAtCheckIn;
                     player.gamesOffset = roundedAverage(earlier.map(pl => getEffectiveGamesPlayedAt(pl, k)));
@@ -821,30 +783,6 @@
         function formatCheckInTime(timestamp) {
             if (!timestamp) return '';
             return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        }
-
-        /**
-         * Returns a local calendar-date key like "2026-10-06" for the given
-         * Date (default: now). Stored on each game so "today's games" can be
-         * identified reliably — the display timestamp string is locale-formatted
-         * and can't be parsed back dependably.
-         */
-        function getLocalDateKey(date = new Date()) {
-            const y = date.getFullYear();
-            const m = String(date.getMonth() + 1).padStart(2, '0');
-            const d = String(date.getDate()).padStart(2, '0');
-            return `${y}-${m}-${d}`;
-        }
-
-        /**
-         * Returns only the games played today (local calendar date), in their
-         * original chronological order. Games recorded before the per-game
-         * `date` field existed have no date and are excluded. Used by
-         * teammate-repeat avoidance (see getPastTeams()).
-         */
-        function getTodaysGames() {
-            const todayKey = getLocalDateKey();
-            return gamesHistory.filter(game => game.date === todayKey);
         }
 
         /**
@@ -955,8 +893,6 @@
         /**
          * Returns the HTML for a clickable, sortable column header label,
          * including the ▲/▼ arrow when this column is the active sort column.
-         * Replaces the old DOM-node-returning createSortableHeaderLabel() now
-         * that renderPlayerList() builds its markup via template strings.
          */
         function sortableHeaderHTML(text, columnKey) {
             let arrow = '';
@@ -980,42 +916,13 @@
             badge.style.display = (todayRosterKey && selectedRoster === todayRosterKey) ? 'inline' : 'none';
         }
 
-        function switchRoster() {
-            const selectedRoster = document.getElementById('rosterSelect').value;
-            let loaded = loadFromLocalStorage(selectedRoster);
-
-            if (!loaded) {
-                let sourceList = getRosterByKey(selectedRoster);
-                players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null, availableSince: null }));
-                gamesHistory = [];
-            }
-
-            pendingTeam1Names = [];
-            pendingTeam2Names = [];
-            
-            document.getElementById('playersPerTeamInput').value = 5;
-            document.getElementById('outputCard').style.display = 'none';
-            
-            hideAlert();
-            renderPlayerList();
-            renderHistory();
-            updateTodayBadge();
-            saveToLocalStorage();
-
-            const rowsContainer = document.querySelector('#playerContainer .player-rows');
-            if (rowsContainer) {
-                rowsContainer.scrollTop = 0;
-            }
-        }
-
         /**
-         * Loads the roster currently chosen in the dropdown, then applies the
-         * same reset the Reset button performs, so the roster always starts
-         * fresh. Used both when the user picks a roster from the dropdown and
-         * on app startup, so the two always behave identically.
+         * Starts a fresh session with the roster currently chosen in the
+         * dropdown. Used both when the user picks a roster and on app startup,
+         * so the two always behave identically.
          */
         function onRosterSelected() {
-            switchRoster();
+            updateTodayBadge();
             resetTracker();
         }
 
@@ -1051,7 +958,6 @@
             }
 
             renderPlayerList();
-            saveToLocalStorage();
         }
 
         function toggleAllCheckedIn(isChecked) {
@@ -1070,7 +976,6 @@
             }
 
             renderPlayerList();
-            saveToLocalStorage();
         }
 
         /**
@@ -1181,11 +1086,9 @@
                 showAlert("Player name must be 16 characters or fewer.");
                 return;
             }
-            // Both sides trimmed defensively: "name" is already trimmed above,
-            // and p.name is trimmed at every entry point (makeRoster(),
-            // loadFromLocalStorage()) — trimming here too means this check
-            // can never be fooled by stray whitespace regardless of source.
-            const isDuplicate = players.some(p => p.name.trim().localeCompare(name, 'en', { sensitivity: 'accent' }) === 0);
+            // "name" is trimmed above and every roster name is trimmed in
+            // makeRoster(), so stray whitespace can't fool this check.
+            const isDuplicate = players.some(p => p.name.localeCompare(name, 'en', { sensitivity: 'accent' }) === 0);
             if (isDuplicate) {
                 showAlert(`"${name}" is already on this roster.`);
                 return;
@@ -1195,7 +1098,6 @@
             input.value = '';
             hideAlert();
             renderPlayerList();
-            saveToLocalStorage();
         }
 
         function toggleAvailable(index, isAvailable) {
@@ -1204,7 +1106,7 @@
             // If marking available and they aren't checked in yet, auto check them in
             if (isAvailable && !player.checkedIn) {
                 toggleCheckedIn(index, true);
-                return; // toggleCheckedIn() already re-renders and saves
+                return; // toggleCheckedIn() already re-renders
             }
 
             if (isAvailable) {
@@ -1214,7 +1116,6 @@
             }
 
             renderPlayerList();
-            saveToLocalStorage();
         }
 
         function toggleCheckedIn(index, isCheckedIn) {
@@ -1228,7 +1129,6 @@
             }
 
             renderPlayerList();
-            saveToLocalStorage();
         }
 
         function adjustGames(index, amount) {
@@ -1237,18 +1137,17 @@
                 players[index].gamesPlayed = 0;
             }
             renderPlayerList();
-            saveToLocalStorage();
         }
 
         /**
-         * Resets the currently selected roster: removes its saved state and
-         * reloads it fresh from its built-in definition. Runs when the user
-         * clicks Reset, and also automatically whenever a roster is selected
-         * (from the dropdown or on app startup — see onRosterSelected()).
+         * Starts a fresh session for the currently selected roster: reloads it
+         * from its built-in definition and clears all check-ins, games played,
+         * and history. Runs when the user clicks Reset, and whenever a roster
+         * is selected (from the dropdown or on app startup — see
+         * onRosterSelected()).
          */
         function resetTracker() {
             const currentRoster = document.getElementById('rosterSelect').value;
-            localStorage.removeItem(STORAGE_KEY_PREFIX + currentRoster);
 
             let sourceList = getRosterByKey(currentRoster);
             players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null, availableSince: null }));
@@ -1261,7 +1160,6 @@
             hideAlert();
             renderPlayerList();
             renderHistory();
-            saveToLocalStorage();
 
             const rowsContainer = document.querySelector('#playerContainer .player-rows');
             if (rowsContainer) {
@@ -1291,19 +1189,19 @@
         // ---- Teammate-repeat avoidance --------------------------------------
 
         // A new team may not contain this many (or more) players who were all on
-        // the same team together in a game played earlier today.
+        // the same team together in an earlier game this session.
         const REPEAT_GROUP_SIZE = 3;
 
         // Maximum random splits to try before settling for the least-overlap one.
         const SPLIT_ATTEMPTS = 2000;
 
         /**
-         * Returns every team from games played today (see getTodaysGames()) as
-         * a Set of player names, for fast membership checks.
+         * Returns every team from this session's games as a Set of player
+         * names, for fast membership checks.
          */
         function getPastTeams() {
             const teams = [];
-            getTodaysGames().forEach(game => {
+            gamesHistory.forEach(game => {
                 teams.push(new Set(game.team1));
                 teams.push(new Set(game.team2));
             });
@@ -1333,7 +1231,7 @@
         /**
          * Splits the chosen players into two teams of `perTeam`, avoiding any
          * team that repeats a teammate group of REPEAT_GROUP_SIZE or more from
-         * a game played earlier today.
+         * an earlier game this session.
          *
          * Tries uniformly random splits and returns the first one with no
          * violations — so every valid split is equally likely. If none is
@@ -1384,12 +1282,8 @@
                 return;
             }
 
-            // Streaks only consider today's games, so last session's games don't
-            // affect today's sit-out priority.
-            const todayKey = getLocalDateKey();
-
             /**
-             * Streak Score Helper. Counts only today's games played since this player
+             * Streak Score Helper. Counts only games played since this player
              * last became available (see markAvailable()), so latecomers and players
              * returning from a rest start at 0 instead of being credited with sit-outs
              * for games they weren't there for.
@@ -1399,8 +1293,7 @@
              */
             function getStreakScore(playerIndex) {
                 const player = players[playerIndex];
-                const start = (player.availableSince === null || player.availableSince === undefined) ? 0 : player.availableSince;
-                const relevantGames = gamesHistory.slice(start).filter(game => game.date === todayKey);
+                const relevantGames = gamesHistory.slice(player.availableSince);
                 if (relevantGames.length === 0) return 0;
 
                 // Check last game played state
@@ -1456,9 +1349,9 @@
             let chosenNames = prioritizedIndices.slice(0, totalNeeded).map(i => players[i].name);
 
             // ...then split them into teams, avoiding repeat teammate groups
-            // from earlier today (see findBestSplit()). Names, not indices, are
-            // stored — indices go stale if the players array is re-sorted
-            // before Accept/Copy.
+            // from earlier this session (see findBestSplit()). Names, not
+            // indices, are stored — indices go stale if the players array is
+            // re-sorted before Accept/Copy.
             const split = findBestSplit(chosenNames, perTeamInput);
 
             // Sorted alphabetically for visual presentation.
@@ -1492,7 +1385,7 @@
             document.getElementById('outputCard').style.display = 'block';
 
             if (split.penalty > 0) {
-                showAlert(`Couldn't fully avoid repeating a group of ${REPEAT_GROUP_SIZE}+ teammates from earlier today with these players, so the split with the least overlap was used.`);
+                showAlert(`Couldn't fully avoid repeating a group of ${REPEAT_GROUP_SIZE}+ teammates from earlier this session with these players, so the split with the least overlap was used.`);
             }
         }
 
@@ -1585,18 +1478,13 @@
 
             // Add to games history. `timestamp` is a display string only, and
             // history is never sorted by time — see getSortedHistoryIndices()
-            // for why. `date` is a local calendar-date key used only to tell
-            // which games were played today (streaks and teammate-repeat
-            // avoidance).
-            const now = new Date();
+            // for why.
             gamesHistory.push({
                 team1: [...pendingTeam1Names],
                 team2: [...pendingTeam2Names],
-                timestamp: now.toLocaleString(),
-                date: getLocalDateKey(now)
+                timestamp: new Date().toLocaleString()
             });
             renderHistory();
-            saveToLocalStorage();
 
             const acceptBtn = document.getElementById('acceptBtn');
             acceptBtn.disabled = true;
@@ -1641,7 +1529,6 @@
             updateGamesOffsetsAfterDeletion(historyIndex);
             renderPlayerList();
             renderHistory();
-            saveToLocalStorage();
 
             if (previewWasPending) {
                 showAlert("Teams preview cleared because game history changed. Generate again for updated teams.");
@@ -1658,8 +1545,7 @@
          * forward — NTP sync, DST transitions, or a manual/automatic clock
          * adjustment can make it jump backward — which would give a later
          * game a smaller timestamp than an earlier one and put them in the
-         * wrong order, persistently, once saved. Array position has no such
-         * failure mode.
+         * wrong order. Array position has no such failure mode.
          */
         function getSortedHistoryIndices() {
             return gamesHistory.map((_, idx) => idx).reverse();
@@ -1712,13 +1598,12 @@
             }).join('');
         }
 
-        // Initialize state on page load. Default to today's roster if one
-        // exists; otherwise fall back to whichever roster was last used.
-        // onRosterSelected() loads it and applies the same reset as the Reset
-        // button — exactly what happens when a roster is picked from the dropdown.
-        const todayRoster = getDefaultRosterKeyForToday();
-        const initialRoster = todayRoster || localStorage.getItem(STORAGE_KEY_LAST_ROSTER) || 'empty';
-        document.getElementById('rosterSelect').value = initialRoster;
+        // Initialize on page load: clear any state older versions saved, then
+        // start fresh with today's roster, or the empty Custom roster on days
+        // without one. onRosterSelected() does exactly what happens when a
+        // roster is picked from the dropdown.
+        clearLegacySavedState();
+        document.getElementById('rosterSelect').value = getDefaultRosterKeyForToday() || 'empty';
         onRosterSelected();
     </script>
 
