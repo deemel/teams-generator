@@ -451,6 +451,12 @@
         .delete-btn:hover {
             background-color: #c82333;
         }
+        .app-version {
+            text-align: center;
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -522,6 +528,9 @@
         <h2>Games Played History</h2>
         <div id="historyContainer"></div>
     </div>
+
+    <!-- Filled in by showAppVersion() with the active service worker's CACHE_NAME -->
+    <div id="appVersion" class="app-version"></div>
 
     <script>
         /**
@@ -1636,12 +1645,33 @@
     </script>
 
     <script>
+        /**
+         * Asks the active service worker for its CACHE_NAME and shows it at the
+         * bottom of the page. Uses a MessageChannel so the reply comes back on
+         * a private port, not as a general message event.
+         */
+        function showAppVersion() {
+            navigator.serviceWorker.ready.then((registration) => {
+                if (!registration.active) return;
+                const channel = new MessageChannel();
+                channel.port1.onmessage = (event) => {
+                    document.getElementById('appVersion').textContent = event.data;
+                };
+                registration.active.postMessage({ type: 'GET_VERSION' }, [channel.port2]);
+            });
+        }
+
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('sw.js').catch((err) => {
                     console.error('Service worker registration failed:', err);
                 });
+                showAppVersion();
             });
+
+            // When a newly deployed service worker takes over (via skipWaiting()
+            // and clients.claim() in sw.js), refresh the displayed version.
+            navigator.serviceWorker.addEventListener('controllerchange', showAppVersion);
         }
     </script>
 </body>
