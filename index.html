@@ -675,17 +675,31 @@
         }
 
         /**
+         * Returns the average of `values`, rounded to the nearest integer, or 0
+         * for an empty list. Shared by computeCurrentAvgOffset() and
+         * updateGamesOffsetsAfterDeletion() so the check-in offset and its
+         * post-deletion correction always round the same way.
+         *
+         * Rounded rather than floored: flooring always rounded in the newcomer's
+         * favor (an average of 2.9 credited them with only 2), giving late
+         * check-ins a slight but consistent priority edge.
+         */
+        function roundedAverage(values) {
+            return values.length > 0
+                ? Math.round(values.reduce((sum, v) => sum + v, 0) / values.length)
+                : 0;
+        }
+
+        /**
          * Returns the average effective games played (gamesPlayed + gamesOffset)
-         * among all currently checked-in players, floored to an integer. Used as
-         * the games-offset value assigned to a player at the moment they check in,
-         * so a newcomer is credited with roughly what everyone else has played.
-         * Returns 0 if no one is checked in yet.
+         * among all currently checked-in players, rounded to the nearest integer
+         * (see roundedAverage()). Used as the games-offset value assigned to a
+         * player at the moment they check in, so a newcomer is credited with
+         * roughly what everyone else has played. Returns 0 if no one is checked
+         * in yet.
          */
         function computeCurrentAvgOffset() {
-            const checkedInPlayers = players.filter(p => p.checkedIn);
-            return checkedInPlayers.length > 0
-                ? Math.floor(checkedInPlayers.reduce((sum, p) => sum + getEffectiveGamesPlayed(p), 0) / checkedInPlayers.length)
-                : 0;
+            return roundedAverage(players.filter(p => p.checkedIn).map(getEffectiveGamesPlayed));
         }
 
         /**
@@ -765,9 +779,7 @@
                 if (player.gamesAtCheckIn !== null && deletedIndex < player.gamesAtCheckIn) {
                     player.gamesAtCheckIn--;
                     const k = player.gamesAtCheckIn;
-                    player.gamesOffset = earlier.length > 0
-                        ? Math.floor(earlier.reduce((sum, pl) => sum + getEffectiveGamesPlayedAt(pl, k), 0) / earlier.length)
-                        : 0;
+                    player.gamesOffset = roundedAverage(earlier.map(pl => getEffectiveGamesPlayedAt(pl, k)));
                 }
                 earlier.push(player);
             });
