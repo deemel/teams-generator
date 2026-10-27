@@ -513,7 +513,8 @@
                 checkedIn: false,
                 checkInTimestamp: null,
                 gamesOffset: null,
-                gamesAtCheckIn: null
+                gamesAtCheckIn: null,
+                availableSince: null
             }));
         }
 
@@ -652,7 +653,12 @@
                             // Players checked in before this field existed load as null;
                             // their offsets are left untouched on game deletion (see
                             // updateGamesOffsetsAfterDeletion()).
-                            gamesAtCheckIn: (p.gamesAtCheckIn === undefined) ? null : p.gamesAtCheckIn
+                            gamesAtCheckIn: (p.gamesAtCheckIn === undefined) ? null : p.gamesAtCheckIn,
+                            // History position where this player's current availability
+                            // began (see markAvailable()). null for data saved before this
+                            // field existed, which makes getStreakScore() fall back to all
+                            // of today's games.
+                            availableSince: (p.availableSince === undefined) ? null : p.availableSince
                         };
                     });
                     gamesHistory = parsed.gamesHistory || [];
@@ -723,10 +729,32 @@
          */
         function applyCheckOut(player) {
             player.checkedIn = false;
-            player.available = false;
+            markUnavailable(player);
             player.checkInTimestamp = null;
             player.gamesOffset = null;
             player.gamesAtCheckIn = null;
+        }
+
+        /**
+         * Marks a player available and records where in history their current
+         * availability began. getStreakScore() only counts games from that point,
+         * so games a player missed while absent or resting don't count as sitting
+         * out. Only recorded on a real unavailable→available change, so re-marking
+         * an already-available player doesn't reset their streak.
+         */
+        function markAvailable(player) {
+            if (!player.available) {
+                player.available = true;
+                player.availableSince = gamesHistory.length;
+            }
+        }
+
+        /**
+         * Marks a player unavailable and clears their availability start point.
+         */
+        function markUnavailable(player) {
+            player.available = false;
+            player.availableSince = null;
         }
 
         /**
@@ -811,9 +839,8 @@
         /**
          * Returns only the games played today (local calendar date), in their
          * original chronological order. Games recorded before the per-game
-         * `date` field existed have no date and are excluded. Used by both the
-         * streak logic and teammate-repeat avoidance, so "today" means exactly
-         * the same thing in both places.
+         * `date` field existed have no date and are excluded. Used by
+         * teammate-repeat avoidance (see getPastTeams()).
          */
         function getTodaysGames() {
             const todayKey = getLocalDateKey();
@@ -959,7 +986,7 @@
 
             if (!loaded) {
                 let sourceList = getRosterByKey(selectedRoster);
-                players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null }));
+                players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null, availableSince: null }));
                 gamesHistory = [];
             }
 
@@ -1017,12 +1044,10 @@
                         // already checked in so far, including earlier ones in this loop.
                         applyCheckIn(p);
                     }
-                    p.available = true;
+                    markAvailable(p);
                 });
             } else {
-                players.forEach((p) => {
-                    p.available = false;
-                });
+                players.forEach(markUnavailable);
             }
 
             renderPlayerList();
@@ -1038,7 +1063,7 @@
                         // including earlier ones in this loop.
                         applyCheckIn(p);
                     }
-                    p.available = true;
+                    markAvailable(p);
                 });
             } else {
                 players.forEach(applyCheckOut);
@@ -1165,7 +1190,7 @@
                 showAlert(`"${name}" is already on this roster.`);
                 return;
             }
-            players.push({ name: name, gamesPlayed: 0, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null });
+            players.push({ name: name, gamesPlayed: 0, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null, availableSince: null });
             players.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'accent' }));
             input.value = '';
             hideAlert();
@@ -1174,12 +1199,18 @@
         }
 
         function toggleAvailable(index, isAvailable) {
-            players[index].available = isAvailable;
+            const player = players[index];
 
             // If marking available and they aren't checked in yet, auto check them in
-            if (isAvailable && !players[index].checkedIn) {
+            if (isAvailable && !player.checkedIn) {
                 toggleCheckedIn(index, true);
                 return; // toggleCheckedIn() already re-renders and saves
+            }
+
+            if (isAvailable) {
+                markAvailable(player);
+            } else {
+                markUnavailable(player);
             }
 
             renderPlayerList();
@@ -1191,7 +1222,7 @@
                 // Records the offset snapshot (a fairness input during team
                 // generation) and the history position used to correct it later.
                 applyCheckIn(players[index]);
-                players[index].available = true;
+                markAvailable(players[index]);
             } else {
                 applyCheckOut(players[index]);
             }
@@ -1220,7 +1251,7 @@
             localStorage.removeItem(STORAGE_KEY_PREFIX + currentRoster);
 
             let sourceList = getRosterByKey(currentRoster);
-            players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null }));
+            players = sourceList.map(p => ({ ...p, available: false, checkedIn: false, checkInTimestamp: null, gamesOffset: null, gamesAtCheckIn: null, availableSince: null }));
             pendingTeam1Names = [];
             pendingTeam2Names = [];
             gamesHistory = [];
@@ -1353,29 +1384,33 @@
                 return;
             }
 
-            // Streaks only consider games played today, so last session's games
-            // don't affect today's sit-out priority. Filtered once here rather
-            // than once per player.
-            const todaysGames = getTodaysGames();
+            // Streaks only consider today's games, so last session's games don't
+            // affect today's sit-out priority.
+            const todayKey = getLocalDateKey();
 
             /**
-             * Streak Score Helper (today's games only):
+             * Streak Score Helper. Counts only today's games played since this player
+             * last became available (see markAvailable()), so latecomers and players
+             * returning from a rest start at 0 instead of being credited with sit-outs
+             * for games they weren't there for.
              * - Returns a NEGATIVE number for consecutive games SAT OUT (e.g., -2 = sat out 2 straight games).
              * - Returns a POSITIVE number for consecutive games PLAYED (e.g., +2 = played 2 straight games).
-             * - Returns 0 if no games have been recorded yet today.
+             * - Returns 0 if no games have been played since they became available.
              */
             function getStreakScore(playerIndex) {
-                let playerName = players[playerIndex].name;
-                if (todaysGames.length === 0) return 0;
+                const player = players[playerIndex];
+                const start = (player.availableSince === null || player.availableSince === undefined) ? 0 : player.availableSince;
+                const relevantGames = gamesHistory.slice(start).filter(game => game.date === todayKey);
+                if (relevantGames.length === 0) return 0;
 
                 // Check last game played state
-                let lastGame = todaysGames[todaysGames.length - 1];
-                let playedLast = lastGame.team1.includes(playerName) || lastGame.team2.includes(playerName);
+                const lastGame = relevantGames[relevantGames.length - 1];
+                const playedLast = lastGame.team1.includes(player.name) || lastGame.team2.includes(player.name);
 
                 let streak = 0;
-                for (let i = todaysGames.length - 1; i >= 0; i--) {
-                    let game = todaysGames[i];
-                    let playedInGame = game.team1.includes(playerName) || game.team2.includes(playerName);
+                for (let i = relevantGames.length - 1; i >= 0; i--) {
+                    const game = relevantGames[i];
+                    const playedInGame = game.team1.includes(player.name) || game.team2.includes(player.name);
 
                     if (playedInGame === playedLast) {
                         streak++;
@@ -1552,7 +1587,7 @@
             // history is never sorted by time — see getSortedHistoryIndices()
             // for why. `date` is a local calendar-date key used only to tell
             // which games were played today (streaks and teammate-repeat
-            // avoidance — see getTodaysGames()).
+            // avoidance).
             const now = new Date();
             gamesHistory.push({
                 team1: [...pendingTeam1Names],
@@ -1582,6 +1617,14 @@
 
             // Remove game entry from history
             gamesHistory.splice(historyIndex, 1);
+
+            // Keep each availableSince pointing at the same spot in history. A deleted
+            // game before that point shifts it down by one; a game after it doesn't affect it.
+            players.forEach(p => {
+                if (p.availableSince !== null && historyIndex < p.availableSince) {
+                    p.availableSince--;
+                }
+            });
 
             // Any open preview was generated from the old history (streaks and
             // games played), so it no longer reflects who should be playing.
