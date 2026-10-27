@@ -72,6 +72,11 @@
         button:hover {
             background-color: #e55c00;
         }
+        .generate-btn {
+            width: 100%;
+            margin-top: 10px;
+            padding: 12px;
+        }
         .accept-btn {
             background-color: #28a745;
             width: 100%;
@@ -121,6 +126,11 @@
             align-items: center;
             gap: 6px;
         }
+        .control-label {
+            font-weight: bold;
+            color: #444;
+            font-size: 14px;
+        }
         .today-badge {
             background-color: #ff6600;
             color: white;
@@ -132,6 +142,15 @@
             vertical-align: middle;
             display: none;
         }
+        .add-player-row {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 15px;
+        }
+        .add-player-row input[type="text"] {
+            flex: 1;
+            margin-right: 0;
+        }
         .player-list-container {
             display: flex;
             justify-content: space-between;
@@ -141,6 +160,11 @@
             font-weight: bold;
             color: #444;
             font-size: 14px;
+        }
+        .player-count {
+            color: #666;
+            font-size: 14px;
+            font-weight: normal;
         }
         .player-list {
             border: 1px solid #ddd;
@@ -261,6 +285,11 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            cursor: pointer;
+            color: #000;
+        }
+        .player-name-label.unavailable {
+            color: #888;
         }
         .player-item input[type="checkbox"],
         .list-header input[type="checkbox"] {
@@ -292,7 +321,8 @@
         }
         .counter-controls {
             display: flex;
-            gap: 4px;
+            align-items: center;
+            gap: 8px;
         }
         .counter-btn {
             padding: 4px 8px;
@@ -394,6 +424,11 @@
             align-items: center;
             margin-bottom: 8px;
         }
+        .history-item-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
         .history-item h4 {
             margin: 0;
             font-size: 1rem;
@@ -432,14 +467,14 @@
         <!-- Combined Top Control Row -->
         <div class="control-row">
             <div class="control-group">
-                <label for="rosterSelect" style="font-weight: bold; color: #333; font-size: 14px;">Roster:</label>
+                <label for="rosterSelect" class="control-label">Roster:</label>
                 <!-- Options are generated from ROSTERS by renderRosterOptions() -->
                 <select id="rosterSelect" onchange="onRosterSelected()"></select>
                 <span id="todayBadge" class="today-badge">Today</span>
             </div>
 
             <div class="control-group">
-                <label for="playersPerTeamInput" style="font-weight: bold; color: #444; font-size: 14px;">Players/team:</label>
+                <label for="playersPerTeamInput" class="control-label">Players/team:</label>
                 <input type="number" id="playersPerTeamInput" value="5" min="1" max="15">
             </div>
 
@@ -447,20 +482,20 @@
         </div>
         
         <!-- Add Player Form -->
-        <div style="margin-bottom: 15px; display: flex; gap: 5px;">
-            <input type="text" id="newPlayerName" placeholder="Enter player name..." maxlength="16" style="flex: 1; margin-right: 0;">
+        <div class="add-player-row">
+            <input type="text" id="newPlayerName" placeholder="Enter player name..." maxlength="16">
             <button onclick="addPlayer()">Add</button>
         </div>
 
         <div class="player-list-container">
             <span>Available players:</span>
-            <span id="playerCountDisplay" style="color: #666; font-size: 14px; font-weight: normal;"><b>Available:</b> 0 / 0</span>
+            <span id="playerCountDisplay" class="player-count"><b>Available:</b> 0 / 0</span>
         </div>
         
         <!-- Dynamic Checkboxes Container -->
         <div id="playerContainer" class="player-list"></div>
 
-        <button onclick="generateTeams()" style="width: 100%; margin-top: 10px; padding: 12px;" id="generateBtnText">Generate Teams Preview</button>
+        <button onclick="generateTeams()" class="generate-btn">Generate Teams Preview</button>
     </div>
 
     <div class="card" id="outputCard" style="display:none;">
@@ -1018,7 +1053,7 @@
 
             let rowsHtml = sortedIndices.map((index) => {
                 let p = players[index];
-                let nameColor = p.available ? '#000' : '#888';
+                let nameClass = p.available ? 'player-name-label' : 'player-name-label unavailable';
                 let checkInTimeHtml = (p.checkedIn && p.checkInTimestamp)
                     ? `<span class="checkin-time">${escapeHtml(formatCheckInTime(p.checkInTimestamp))}</span>`
                     : '';
@@ -1030,7 +1065,7 @@
                             <div class="player-info">
                                 <input type="checkbox" id="available_${index}" ${p.available ? 'checked' : ''}
                                     onchange="toggleAvailable(${index}, this.checked)">
-                                <label for="available_${index}" class="player-name-label" style="cursor: pointer; color: ${nameColor};" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</label>
+                                <label for="available_${index}" class="${nameClass}" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</label>
                             </div>
                         </div>
                         <div class="player-center-group">
@@ -1042,7 +1077,7 @@
                             <span class="stats-badge">${offsetText}</span>
                         </div>
                         <div class="player-right-group">
-                            <div class="counter-controls" style="display: flex; align-items: center; gap: 8px;">
+                            <div class="counter-controls">
                                 <button class="counter-btn" onclick="adjustGames(${index}, -1)">-</button>
                                 <span class="stats-badge">${p.gamesPlayed}</span>
                                 <button class="counter-btn" onclick="adjustGames(${index}, 1)">+</button>
@@ -1331,7 +1366,8 @@
         }
 
         /**
-         * Shows the pending teams in the preview card and re-enables Accept.
+         * Shows the pending teams in the preview card and re-enables Accept,
+         * resetting its label (acceptLineup() changes it to "Teams Accepted ✓").
          */
         function renderTeamsPreview() {
             const toListHtml = names => names.map(name => `<li>${escapeHtml(name)}</li>`).join('');
@@ -1475,9 +1511,11 @@
             });
             renderHistory();
 
+            // Confirm the accept; renderTeamsPreview() restores the label on
+            // the next Generate.
             const acceptBtn = document.getElementById('acceptBtn');
             acceptBtn.disabled = true;
-            acceptBtn.textContent = "Accept Teams & Update Games Played";
+            acceptBtn.textContent = "Teams Accepted ✓";
         }
 
         function deleteGame(historyIndex) {
@@ -1567,7 +1605,7 @@
                     <div class="history-item">
                         <div class="history-item-header">
                             <h4>Game ${index + 1}</h4>
-                            <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="history-item-actions">
                                 <span class="history-timestamp">${escapeHtml(game.timestamp)}</span>
                                 <button class="delete-btn" onclick="deleteGame(${index})">Delete</button>
                             </div>
