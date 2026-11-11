@@ -194,9 +194,27 @@
             position: relative;
             z-index: 1;
         }
+        /* The vertical scrollbar is always shown, even when the list is short
+           enough not to scroll. overflow-y: scroll always reserves it, and the
+           ::-webkit-scrollbar styling below turns it into a classic scrollbar
+           that stays visible instead of an overlay one that only appears while
+           scrolling (macOS and Android browsers otherwise hide it).
+           scrollbar-color covers Firefox's colors. */
         .player-rows {
             max-height: 400px;
-            overflow-y: auto;
+            overflow-y: scroll;
+            scrollbar-color: #bbb #f0f0f0;
+        }
+        .player-rows::-webkit-scrollbar {
+            width: 8px;
+        }
+        .player-rows::-webkit-scrollbar-track {
+            background: #f0f0f0;
+            border-radius: 4px;
+        }
+        .player-rows::-webkit-scrollbar-thumb {
+            background: #bbb;
+            border-radius: 4px;
         }
         /* box-sizing so the right padding added by renderPlayerList() (to
            match the rows' scrollbar) comes out of the header's width rather
@@ -223,20 +241,24 @@
         }
 
         /* ---- Column layout ----
-           Every column except Player has a fixed width sized to its content,
-           the same in the header and every row so the columns stay lined up.
-           The Player column takes all the remaining width, so the more the
-           other columns are tightened, the more of each name fits.
+           Every column except Player has a fixed width sized to its content.
+           The Player column is sized by updatePlayerColumnWidth() to fit the
+           longest name (plus a little room), via the --player-col-width
+           variable set on the list. It can shrink below that on narrow
+           screens, where long names then end in "…". Any space left over is
+           shared evenly between the columns (justify-content: space-between
+           on the header and each row). Every rule covers both the header cell
+           and the row cells, so the columns always line up.
            nowrap on the header cells keeps a sort arrow on the same line as
            its label. */
 
-        /* Player: takes whatever width is left */
+        /* Player: fits the longest name, shrinking if space runs out */
         .header-left-group,
         .player-left-group {
             display: flex;
             align-items: center;
             gap: 10px;
-            flex: 1;
+            flex: 0 1 var(--player-col-width, auto);
             min-width: 0;
         }
         /* Chk-in: checkbox plus check-in time */
@@ -303,7 +325,8 @@
            explicit size and margin, so browser defaults can't make them
            differ (some phones draw default checkboxes larger) and the
            "check all" boxes sit directly above the boxes below them.
-           Change width/height here to resize all checkboxes at once. */
+           Change width/height here to resize all checkboxes at once
+           (and CHECKBOX_SPACE in the script, which assumes this size). */
         .player-item input[type="checkbox"],
         .list-header input[type="checkbox"] {
             width: 14px;
@@ -962,6 +985,58 @@
             return d.getHours() * 60 + d.getMinutes();
         }
 
+        // ---- Player column width -------------------------------------------
+
+        // Horizontal space a checkbox takes: its 14px width plus 2px margin
+        // on each side (see the shared checkbox rule in the CSS).
+        const CHECKBOX_SPACE = 18;
+
+        // Extra room added after the longest name, so it isn't flush
+        // against the next column.
+        const PLAYER_COL_BREATHING_ROOM = 8;
+
+        // Off-screen canvas used only to measure text widths.
+        const textMeasureContext = document.createElement('canvas').getContext('2d');
+
+        /**
+         * Width in pixels of `text` drawn in the same font as `element`.
+         * Measured on a canvas rather than from the element itself, since
+         * the element's own width depends on the column width being set.
+         */
+        function measureTextWidth(text, element) {
+            const style = getComputedStyle(element);
+            textMeasureContext.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            return textMeasureContext.measureText(text).width;
+        }
+
+        /**
+         * Sizes the Player column to fit the longest player name (or the
+         * "Player" heading, if that's wider), plus PLAYER_COL_BREATHING_ROOM,
+         * by setting the --player-col-width variable the column CSS uses.
+         * On screens too narrow for that, the column shrinks and long names
+         * end in "…" as before. Called by renderPlayerList() after each render,
+         * so the width follows the roster as players are added.
+         */
+        function updatePlayerColumnWidth(container) {
+            const headerLabel = container.querySelector('.header-left-group .sortable-header');
+            const nameLabels = container.querySelectorAll('.player-name-label');
+
+            // Header: checkbox + 10px gap + "Player" (with any sort arrow)
+            let needed = headerLabel
+                ? CHECKBOX_SPACE + 10 + measureTextWidth(headerLabel.textContent, headerLabel)
+                : 0;
+
+            // Rows: checkbox + 8px gap + name. All names share one font, so
+            // the font is read from the first label.
+            if (nameLabels.length > 0) {
+                const widestName = Math.max(...players.map(p => measureTextWidth(p.name, nameLabels[0])));
+                needed = Math.max(needed, CHECKBOX_SPACE + 8 + widestName);
+            }
+
+            const width = Math.ceil(needed + PLAYER_COL_BREATHING_ROOM);
+            container.style.setProperty('--player-col-width', `${width}px`);
+        }
+
         function setSortColumn(column) {
             if (playerSort.column === column) {
                 playerSort.direction = (playerSort.direction === 'asc') ? 'desc' : 'asc';
@@ -1217,17 +1292,21 @@
                 selectAllCheckedInCheckbox.indeterminate = checkedInCount > 0 && checkedInCount < totalCount;
             }
 
+            // Size the Player column to the longest name now that it's rendered
+            updatePlayerColumnWidth(container);
+
             // Restore scroll position after rebuilding the list
             const rowsContainer = container.querySelector('.player-rows');
             if (rowsContainer) {
                 rowsContainer.scrollTop = previousScrollTop;
             }
 
-            // When the rows scroll, desktop browsers draw a scrollbar inside
-            // them, making each row narrower than the header by its width.
-            // Pad the header by the same amount so both have the same usable
+            // The rows always show a scrollbar (see .player-rows), which takes
+            // width out of each row but not out of the header. Pad the header
+            // by the scrollbar's actual width so both have the same usable
             // width and every column (and checkbox) lines up with its heading.
-            // Phones use overlay scrollbars that take no space, so this is 0.
+            // Where the browser still uses an overlay scrollbar that takes no
+            // space (e.g. iOS), this measures 0 and adds no padding.
             const header = container.querySelector('.list-header');
             if (header && rowsContainer) {
                 const scrollbarWidth = rowsContainer.offsetWidth - rowsContainer.clientWidth;
