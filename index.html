@@ -189,24 +189,26 @@
             z-index: 0;
             pointer-events: none;
         }
-        .list-header,
+
+        /* ---- Scrolling area ----
+           The header row and all player rows live in one scroll container
+           that scrolls both vertically and horizontally, so the header always
+           moves sideways together with the rows. Both scrollbars are always
+           shown: overflow: scroll always reserves them, and the
+           ::-webkit-scrollbar styling turns them into classic scrollbars that
+           stay visible instead of overlay ones that only appear while
+           scrolling (macOS and Android browsers otherwise hide them).
+           scrollbar-color covers Firefox's colors. */
         .player-rows {
             position: relative;
             z-index: 1;
-        }
-        /* The vertical scrollbar is always shown, even when the list is short
-           enough not to scroll. overflow-y: scroll always reserves it, and the
-           ::-webkit-scrollbar styling below turns it into a classic scrollbar
-           that stays visible instead of an overlay one that only appears while
-           scrolling (macOS and Android browsers otherwise hide it).
-           scrollbar-color covers Firefox's colors. */
-        .player-rows {
             max-height: 400px;
-            overflow-y: scroll;
+            overflow: scroll;
             scrollbar-color: #bbb #f0f0f0;
         }
         .player-rows::-webkit-scrollbar {
             width: 8px;
+            height: 8px;
         }
         .player-rows::-webkit-scrollbar-track {
             background: #f0f0f0;
@@ -216,20 +218,30 @@
             background: #bbb;
             border-radius: 4px;
         }
-        /* box-sizing so the right padding added by renderPlayerList() (to
-           match the rows' scrollbar) comes out of the header's width rather
-           than widening it */
+        .player-rows::-webkit-scrollbar-corner {
+            background: #f0f0f0;
+        }
+
+        /* The header row stays pinned to the top while scrolling down. Its
+           white background hides the rows scrolling underneath it.
+           min-width: max-content (here and on .player-item) lets a row grow
+           wider than the visible area, which is what makes it scroll sideways;
+           every row and the header end up the same width, so the columns
+           stay lined up. */
         .list-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding-bottom: 8px;
-            margin-bottom: 8px;
             border-bottom: 2px solid #ccc;
             font-weight: bold;
             color: #444;
             font-size: 14px;
-            box-sizing: border-box;
+            position: sticky;
+            top: 0;
+            z-index: 3;
+            background: white;
+            min-width: max-content;
         }
         .player-item {
             display: flex;
@@ -238,28 +250,39 @@
             margin-bottom: 8px;
             padding-bottom: 6px;
             border-bottom: 1px solid #eee;
+            min-width: max-content;
+        }
+        /* Gap between the header row and the first player row */
+        .list-header + .player-item {
+            margin-top: 8px;
         }
 
         /* ---- Column layout ----
-           Every column except Player has a fixed width sized to its content.
            The Player column is sized by updatePlayerColumnWidth() to fit the
            longest name (plus a little room), via the --player-col-width
-           variable set on the list. It can shrink below that on narrow
-           screens, where long names then end in "…". Any space left over is
-           shared evenly between the columns (justify-content: space-between
-           on the header and each row). Every rule covers both the header cell
-           and the row cells, so the columns always line up.
-           nowrap on the header cells keeps a sort arrow on the same line as
-           its label. */
+           variable set on the list, and never shrinks. Every other column has
+           a fixed width sized to its content. When the columns don't all fit,
+           the list scrolls sideways; when there's room to spare, it's shared
+           evenly between the columns (justify-content: space-between).
+           Every rule covers both the header cell and the row cells, so the
+           columns always line up. nowrap on the header cells keeps a sort
+           arrow on the same line as its label. */
 
-        /* Player: fits the longest name, shrinking if space runs out */
+        /* Player: pinned to the left edge while the other columns scroll
+           sideways underneath it. The white background hides them as they
+           pass, and the shadow marks its edge. */
         .header-left-group,
         .player-left-group {
             display: flex;
             align-items: center;
             gap: 10px;
-            flex: 0 1 var(--player-col-width, auto);
+            flex: 0 0 var(--player-col-width, auto);
             min-width: 0;
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            background: white;
+            box-shadow: 4px 0 4px -4px rgba(0, 0, 0, 0.2);
         }
         /* Chk-in: checkbox plus check-in time */
         .header-center-group,
@@ -1013,9 +1036,10 @@
          * Sizes the Player column to fit the longest player name (or the
          * "Player" heading, if that's wider), plus PLAYER_COL_BREATHING_ROOM,
          * by setting the --player-col-width variable the column CSS uses.
-         * On screens too narrow for that, the column shrinks and long names
-         * end in "…" as before. Called by renderPlayerList() after each render,
-         * so the width follows the roster as players are added.
+         * The column never shrinks below this, so full names always show;
+         * on narrow screens the other columns scroll sideways instead.
+         * Called by renderPlayerList() after each render, so the width
+         * follows the roster as players are added.
          */
         function updatePlayerColumnWidth(container) {
             const headerLabel = container.querySelector('.header-left-group .sortable-header');
@@ -1188,17 +1212,20 @@
 
         /**
          * Renders the player list: a sortable header row plus one row per
-         * player. Builds the whole thing as an HTML string via template
-         * literals and sets it in a single innerHTML assignment, rather than
-         * constructing each element/attribute individually with
-         * document.createElement — same visual result, far less code.
+         * player, all inside a single scroll container (.player-rows) so the
+         * header scrolls sideways together with the rows. Builds the whole
+         * thing as an HTML string via template literals and sets it in a
+         * single innerHTML assignment, rather than constructing each
+         * element/attribute individually with document.createElement — same
+         * visual result, far less code.
          */
         function renderPlayerList() {
             const container = document.getElementById('playerContainer');
 
-            // Preserve current scroll position before rebuilding
+            // Preserve the current scroll position (both directions) before rebuilding
             const existingRows = container.querySelector('.player-rows');
             const previousScrollTop = existingRows ? existingRows.scrollTop : 0;
+            const previousScrollLeft = existingRows ? existingRows.scrollLeft : 0;
 
             let totalCount = players.length;
             let availableCount = players.filter(p => p.available).length;
@@ -1254,31 +1281,33 @@
             }).join('');
 
             container.innerHTML = `
-                <div class="list-header">
-                    <div class="header-left-group">
-                        <input type="checkbox" id="selectAllCheckbox" ${(totalCount > 0 && availableCount === totalCount) ? 'checked' : ''}
-                            onchange="toggleSelectAllAvailable(this.checked)">
-                        ${sortableHeaderHTML("Player", 'name')}
+                <div class="player-rows">
+                    <div class="list-header">
+                        <div class="header-left-group">
+                            <input type="checkbox" id="selectAllCheckbox" ${(totalCount > 0 && availableCount === totalCount) ? 'checked' : ''}
+                                onchange="toggleSelectAllAvailable(this.checked)">
+                            ${sortableHeaderHTML("Player", 'name')}
+                        </div>
+                        <div class="header-center-group">
+                            <input type="checkbox" id="selectAllCheckedInCheckbox" ${(totalCount > 0 && checkedInCount === totalCount) ? 'checked' : ''}
+                                onchange="toggleAllCheckedIn(this.checked)">
+                            ${sortableHeaderHTML("Chk-in", 'checkedIn')}
+                        </div>
+                        <div class="header-offset-group">
+                            ${sortableHeaderHTML("GPO", 'gamesOffset')}
+                        </div>
+                        <div class="header-right-group">
+                            ${sortableHeaderHTML("GP", 'gamesPlayed')}
+                        </div>
+                        <div class="header-eff-group">
+                            ${sortableHeaderHTML("EGP", 'effGamesPlayed')}
+                        </div>
+                        <div class="header-streak-group">
+                            ${sortableHeaderHTML("Strk", 'streak')}
+                        </div>
                     </div>
-                    <div class="header-center-group">
-                        <input type="checkbox" id="selectAllCheckedInCheckbox" ${(totalCount > 0 && checkedInCount === totalCount) ? 'checked' : ''}
-                            onchange="toggleAllCheckedIn(this.checked)">
-                        ${sortableHeaderHTML("Chk-in", 'checkedIn')}
-                    </div>
-                    <div class="header-offset-group">
-                        ${sortableHeaderHTML("GPO", 'gamesOffset')}
-                    </div>
-                    <div class="header-right-group">
-                        ${sortableHeaderHTML("GP", 'gamesPlayed')}
-                    </div>
-                    <div class="header-eff-group">
-                        ${sortableHeaderHTML("EGP", 'effGamesPlayed')}
-                    </div>
-                    <div class="header-streak-group">
-                        ${sortableHeaderHTML("Strk", 'streak')}
-                    </div>
+                    ${rowsHtml}
                 </div>
-                <div class="player-rows">${rowsHtml}</div>
             `;
 
             // "indeterminate" can't be expressed via an HTML attribute, so it's
@@ -1295,22 +1324,13 @@
             // Size the Player column to the longest name now that it's rendered
             updatePlayerColumnWidth(container);
 
-            // Restore scroll position after rebuilding the list
+            // Restore the scroll position after rebuilding the list. Done
+            // after sizing the Player column, since that sets how far the
+            // list can scroll sideways.
             const rowsContainer = container.querySelector('.player-rows');
             if (rowsContainer) {
                 rowsContainer.scrollTop = previousScrollTop;
-            }
-
-            // The rows always show a scrollbar (see .player-rows), which takes
-            // width out of each row but not out of the header. Pad the header
-            // by the scrollbar's actual width so both have the same usable
-            // width and every column (and checkbox) lines up with its heading.
-            // Where the browser still uses an overlay scrollbar that takes no
-            // space (e.g. iOS), this measures 0 and adds no padding.
-            const header = container.querySelector('.list-header');
-            if (header && rowsContainer) {
-                const scrollbarWidth = rowsContainer.offsetWidth - rowsContainer.clientWidth;
-                header.style.paddingRight = `${scrollbarWidth}px`;
+                rowsContainer.scrollLeft = previousScrollLeft;
             }
 
             updatePlayerCounts();
@@ -1407,9 +1427,11 @@
             renderPlayerList();
             renderHistory();
 
+            // A fresh session starts scrolled to the top-left
             const rowsContainer = document.querySelector('#playerContainer .player-rows');
             if (rowsContainer) {
                 rowsContainer.scrollTop = 0;
+                rowsContainer.scrollLeft = 0;
             }
         }
 
