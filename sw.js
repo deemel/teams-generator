@@ -3,7 +3,7 @@
 // version, and the activate handler below deletes the old cache.
 // It's also what the app shows at the bottom of the page (see the
 // 'message' listener below).
-const CACHE_NAME = 'teams-tracker-cache-v3';
+const CACHE_NAME = 'teams-tracker-cache-v4';
 
 const FILES_TO_CACHE = [
   './',
