@@ -883,12 +883,22 @@
 
         /**
          * Formats a checkInTimestamp (ms since epoch, from Date.now()) into a
-         * short display string like "03:45 PM" for showing next to a player's
+         * short display string like "03:45" for showing next to a player's
          * Check-in checkbox. Returns an empty string if no timestamp is set.
+         *
+         * Uses the device's own time style, but with any AM/PM marker removed:
+         * on a 12-hour device 3:45 PM shows as "03:45", while a 24-hour
+         * device shows "15:45" as before. Trimming removes the space that
+         * separated the marker from the time.
          */
         function formatCheckInTime(timestamp) {
             if (!timestamp) return '';
-            return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' })
+                .formatToParts(new Date(timestamp))
+                .filter(part => part.type !== 'dayPeriod')
+                .map(part => part.value)
+                .join('')
+                .trim();
         }
 
         /**
@@ -929,8 +939,10 @@
          * Converts a checkInTimestamp into minutes since midnight (local time),
          * matching the same hh:mm granularity shown in the UI via
          * formatCheckInTime(). Used for sorting so two check-ins that display
-         * the same hh:mm AM/PM time are correctly treated as ties, rather than
+         * the same hh:mm time are correctly treated as ties, rather than
          * being ordered by their exact (invisible) millisecond difference.
+         * Works from the real 24-hour time, so sorting stays correct even
+         * though the display no longer shows AM/PM.
          * Returns null if no timestamp is set.
          */
         function getCheckInMinutes(timestamp) {
