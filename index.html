@@ -884,7 +884,7 @@
         /**
          * Formats a checkInTimestamp (ms since epoch, from Date.now()) into a
          * short display string like "03:45 PM" for showing next to a player's
-         * Checked In checkbox. Returns an empty string if no timestamp is set.
+         * Check-in checkbox. Returns an empty string if no timestamp is set.
          */
         function formatCheckInTime(timestamp) {
             if (!timestamp) return '';
@@ -1076,7 +1076,7 @@
         }
 
         /**
-         * "Checked In" header checkbox. Checking it checks in and marks everyone
+         * "Check-in" header checkbox. Checking it checks in and marks everyone
          * available; unchecking it checks everyone out.
          */
         function toggleAllCheckedIn(isChecked) {
@@ -1165,7 +1165,7 @@
                     <div class="header-center-group">
                         <input type="checkbox" id="selectAllCheckedInCheckbox" ${(totalCount > 0 && checkedInCount === totalCount) ? 'checked' : ''}
                             onchange="toggleAllCheckedIn(this.checked)">
-                        ${sortableHeaderHTML("Checked In", 'checkedIn')}
+                        ${sortableHeaderHTML("Check-in", 'checkedIn')}
                     </div>
                     <div class="header-offset-group">
                         ${sortableHeaderHTML("GP Offset", 'gamesOffset')}
