@@ -223,7 +223,8 @@
             gap: 10px;
             flex: 1;
         }
-        .header-offset-group {
+        .header-offset-group,
+        .header-eff-group {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -259,7 +260,8 @@
             gap: 6px;
             flex: 1;
         }
-        .player-offset-group {
+        .player-offset-group,
+        .player-eff-group {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -723,7 +725,8 @@
         /**
          * Effective Games Played: a player's raw gamesPlayed plus their gamesOffset
          * (the average effective games they were credited with at check-in). Used as
-         * the fairness basis for both the check-in average calculation and team generation.
+         * the fairness basis for both the check-in average calculation and team generation,
+         * and shown in the "Eff Games Played" column.
          */
         function getEffectiveGamesPlayed(player) {
             return player.gamesPlayed + getOffset(player);
@@ -917,11 +920,13 @@
 
         // For each numeric sort column, the value players are compared by.
         // Players without a value (not checked in) get -1, so they sort as lower
-        // than anyone who has one.
+        // than anyone who has one. Eff Games Played always has a value, since
+        // getEffectiveGamesPlayed() treats a missing offset as 0.
         const SORT_KEYS = {
-            checkedIn:   p => getCheckInMinutes(p.checkInTimestamp) ?? -1,
-            gamesOffset: p => p.gamesOffset ?? -1,
-            gamesPlayed: p => p.gamesPlayed
+            checkedIn:      p => getCheckInMinutes(p.checkInTimestamp) ?? -1,
+            gamesOffset:    p => p.gamesOffset ?? -1,
+            gamesPlayed:    p => p.gamesPlayed,
+            effGamesPlayed: p => getEffectiveGamesPlayed(p)
         };
 
         /**
@@ -1092,6 +1097,9 @@
                                 <button class="counter-btn" onclick="adjustGames(${index}, 1)">+</button>
                             </div>
                         </div>
+                        <div class="player-eff-group">
+                            <span class="stats-badge">${getEffectiveGamesPlayed(p)}</span>
+                        </div>
                     </div>
                 `;
             }).join('');
@@ -1113,6 +1121,9 @@
                     </div>
                     <div class="header-right-group">
                         ${sortableHeaderHTML("Games Played", 'gamesPlayed')}
+                    </div>
+                    <div class="header-eff-group">
+                        ${sortableHeaderHTML("Eff Games Played", 'effGamesPlayed')}
                     </div>
                 </div>
                 <div class="player-rows">${rowsHtml}</div>
