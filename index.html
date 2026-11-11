@@ -223,20 +223,21 @@
             gap: 10px;
             flex: 1;
         }
-        .header-offset-group,
+        /* GP Offset holds the -/+ controls, so it gets the wider column */
+        .header-offset-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            text-align: center;
+        }
+        .header-right-group,
         .header-eff-group {
             display: flex;
             align-items: center;
             justify-content: center;
             flex: 0.8;
             text-align: center;
-        }
-        .header-right-group {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
-            flex: 1;
         }
         .player-item {
             display: flex;
@@ -260,19 +261,18 @@
             gap: 6px;
             flex: 1;
         }
-        .player-offset-group,
+        .player-offset-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+        }
+        .player-right-group,
         .player-eff-group {
             display: flex;
             align-items: center;
             justify-content: center;
             flex: 0.8;
-        }
-        .player-right-group {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
-            flex: 1;
         }
         .player-info {
             display: flex;
@@ -335,6 +335,13 @@
         }
         .counter-btn:hover {
             background-color: #ccc;
+        }
+        /* Offset can't be adjusted for players who aren't checked in */
+        .counter-btn:disabled,
+        .counter-btn:disabled:hover {
+            background-color: #ddd;
+            opacity: 0.4;
+            cursor: not-allowed;
         }
         .teams-container {
             display: flex;
@@ -551,6 +558,7 @@
                 checkedIn: false,
                 checkInTimestamp: null,
                 gamesOffset: null,
+                offsetAdjustment: 0,
                 gamesAtCheckIn: null,
                 availableSince: null
             };
@@ -568,11 +576,20 @@
         }
 
         /**
-         * A player's games offset for fairness math, treating "not checked in"
-         * (null) as 0.
+         * A player's total games offset: the automatic offset set at check-in
+         * (gamesOffset) plus any manual -/+ adjustment (offsetAdjustment).
+         * Can be negative: a negative offset gives a player extra priority in
+         * team selection. Players who aren't checked in have no offset, so
+         * this returns 0 for them. This is the value shown in the GP Offset
+         * column and used in all fairness math.
+         *
+         * The two parts are stored separately so that when
+         * updateGamesOffsetsAfterDeletion() recalculates the automatic part,
+         * manual adjustments are kept instead of overwritten.
          */
         function getOffset(player) {
-            return player.gamesOffset ?? 0;
+            if (player.gamesOffset === null) return 0;
+            return player.gamesOffset + player.offsetAdjustment;
         }
 
         /**
@@ -724,10 +741,10 @@
         let playerSort = { column: 'name', direction: 'asc' };
 
         /**
-         * Effective Games Played: a player's raw gamesPlayed plus their gamesOffset
-         * (the average effective games they were credited with at check-in). Used as
-         * the fairness basis for both the check-in average calculation and team generation,
-         * and shown in the "Eff GP" column.
+         * Effective Games Played: a player's raw gamesPlayed plus their total
+         * games offset (see getOffset()). Used as the fairness basis for both
+         * the check-in average calculation and team generation, and shown in
+         * the "Eff GP" column. Can be negative if the offset is negative.
          */
         function getEffectiveGamesPlayed(player) {
             return player.gamesPlayed + getOffset(player);
@@ -750,7 +767,7 @@
         }
 
         /**
-         * Returns the average effective games played (gamesPlayed + gamesOffset)
+         * Returns the average effective games played (gamesPlayed + offset)
          * among all currently checked-in players, rounded to the nearest integer
          * (see roundedAverage()). Used as the games-offset value assigned to a
          * player at the moment they check in, so a newcomer is credited with
@@ -765,26 +782,28 @@
          * Records a check-in on a player object: offset snapshot, check-in time,
          * and how many games were already in history at that moment. Shared by
          * toggleCheckedIn() and checkInAndMarkAllAvailable() so both always
-         * record the same fields.
+         * record the same fields. Any manual offset adjustment starts at 0.
          */
         function applyCheckIn(player) {
             // Computed before setting checkedIn, so the player doesn't count
             // themselves in the average.
             player.gamesOffset = computeCurrentAvgOffset();
+            player.offsetAdjustment = 0;
             player.checkedIn = true;
             player.checkInTimestamp = Date.now();
             player.gamesAtCheckIn = gamesHistory.length;
         }
 
         /**
-         * Clears all check-in fields on a player object. Shared by
-         * toggleCheckedIn() and toggleAllCheckedIn().
+         * Clears all check-in fields on a player object, including any manual
+         * offset adjustment. Shared by toggleCheckedIn() and toggleAllCheckedIn().
          */
         function applyCheckOut(player) {
             player.checkedIn = false;
             markUnavailable(player);
             player.checkInTimestamp = null;
             player.gamesOffset = null;
+            player.offsetAdjustment = 0;
             player.gamesAtCheckIn = null;
         }
 
@@ -814,7 +833,7 @@
          * A player's effective games played as of the moment the first
          * `historyCount` games had been recorded. Works backward from their
          * current gamesPlayed by subtracting the games they appear in after
-         * that point, so manual +/- adjustments made earlier are preserved.
+         * that point.
          */
         function getEffectiveGamesPlayedAt(player, historyCount) {
             const gamesSince = gamesHistory.slice(historyCount).filter(game => playedIn(game, player.name)).length;
@@ -835,6 +854,9 @@
          *   pointing at the same spot in history) and their offset is recomputed
          *   from what the earlier-checked-in players had played at that point —
          *   NOT from their current totals, which include later games.
+         *
+         * Only the automatic part (gamesOffset) is recomputed; any manual
+         * offsetAdjustment is kept as-is.
          *
          * Players are processed in check-in order so any earlier player whose
          * offset changes is already corrected before later players use it.
@@ -920,12 +942,13 @@
         }
 
         // For each numeric sort column, the value players are compared by.
-        // Players without a value (not checked in) get -1, so they sort as lower
-        // than anyone who has one. Eff GP always has a value, since
-        // getEffectiveGamesPlayed() treats a missing offset as 0.
+        // Players without a value (not checked in) get a value lower than any
+        // real one, so they sort below everyone who has one: -1 for check-in
+        // time (real values are never negative), and -Infinity for GP Offset
+        // (real offsets can be negative). GP and Eff GP always have a value.
         const SORT_KEYS = {
             checkedIn:      p => getCheckInMinutes(p.checkInTimestamp) ?? -1,
-            gamesOffset:    p => p.gamesOffset ?? -1,
+            gamesOffset:    p => p.checkedIn ? getOffset(p) : -Infinity,
             gamesPlayed:    p => p.gamesPlayed,
             effGamesPlayed: p => getEffectiveGamesPlayed(p)
         };
@@ -935,6 +958,9 @@
          * The name column sorts by name in the chosen direction. Numeric columns
          * sort by their SORT_KEYS value in the chosen direction, and ties are
          * always broken by name A→Z, whatever the direction.
+         *
+         * Keys are compared directly rather than subtracted, since subtracting
+         * two -Infinity keys gives NaN, which would break the tie-break.
          */
         function getSortedPlayerIndices() {
             const dir = playerSort.direction === 'asc' ? 1 : -1;
@@ -945,8 +971,12 @@
                 if (!getKey) {
                     return nameCompare * dir;
                 }
-                const diff = getKey(players[a]) - getKey(players[b]);
-                return diff !== 0 ? diff * dir : nameCompare;
+                const keyA = getKey(players[a]);
+                const keyB = getKey(players[b]);
+                if (keyA !== keyB) {
+                    return (keyA < keyB ? -1 : 1) * dir;
+                }
+                return nameCompare;
             });
         }
 
@@ -1072,7 +1102,9 @@
                 let checkInTimeHtml = (p.checkedIn && p.checkInTimestamp)
                     ? `<span class="checkin-time">${escapeHtml(formatCheckInTime(p.checkInTimestamp))}</span>`
                     : '';
-                let offsetText = p.gamesOffset ?? '-';
+                let offsetText = p.checkedIn ? getOffset(p) : '-';
+                // Offset only exists while checked in, so -/+ is disabled otherwise
+                let offsetBtnState = p.checkedIn ? '' : 'disabled';
 
                 return `
                     <div class="player-item">
@@ -1089,14 +1121,14 @@
                             ${checkInTimeHtml}
                         </div>
                         <div class="player-offset-group">
-                            <span class="stats-badge">${offsetText}</span>
+                            <div class="counter-controls">
+                                <button class="counter-btn" onclick="adjustOffset(${index}, -1)" ${offsetBtnState}>-</button>
+                                <span class="stats-badge">${offsetText}</span>
+                                <button class="counter-btn" onclick="adjustOffset(${index}, 1)" ${offsetBtnState}>+</button>
+                            </div>
                         </div>
                         <div class="player-right-group">
-                            <div class="counter-controls">
-                                <button class="counter-btn" onclick="adjustGames(${index}, -1)">-</button>
-                                <span class="stats-badge">${p.gamesPlayed}</span>
-                                <button class="counter-btn" onclick="adjustGames(${index}, 1)">+</button>
-                            </div>
+                            <span class="stats-badge">${p.gamesPlayed}</span>
                         </div>
                         <div class="player-eff-group">
                             <span class="stats-badge">${getEffectiveGamesPlayed(p)}</span>
@@ -1205,11 +1237,18 @@
             renderPlayerList();
         }
 
-        function adjustGames(index, amount) {
-            players[index].gamesPlayed += amount;
-            if (players[index].gamesPlayed < 0) {
-                players[index].gamesPlayed = 0;
-            }
+        /**
+         * -/+ buttons in the GP Offset column. Moves the player's manual
+         * offsetAdjustment, and so their total offset (getOffset()), by
+         * `amount`. The offset may go negative, which gives the player extra
+         * priority in team selection. Only works for checked-in players,
+         * since others have no offset (the buttons are disabled for them anyway).
+         */
+        function adjustOffset(index, amount) {
+            const player = players[index];
+            if (!player.checkedIn) return;
+
+            player.offsetAdjustment += amount;
             renderPlayerList();
         }
 
@@ -1364,7 +1403,7 @@
          * Decides WHO plays next: returns the names of the `count` highest-priority
          * available players. All the fairness rules for selection live here:
          * 1. Streak tier first: longest sit-out streak (most negative score) wins.
-         * 2. Within a tier, fewest effective games played (gamesPlayed + gamesOffset).
+         * 2. Within a tier, fewest effective games played (gamesPlayed + offset).
          * 3. Exact ties are broken randomly: each tier is shuffled before the
          *    stable sort, so tied players keep that random order.
          * Callers must ensure at least `count` players are available.
