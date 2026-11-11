@@ -299,12 +299,15 @@
         .player-name-label.unavailable {
             color: #888;
         }
-        /* Same explicit margin on every checkbox in the header and the rows,
-           so browser default styles can't shift one set relative to the other
-           and the "check all" boxes sit directly above the boxes below them */
+        /* One rule for every checkbox in the header and the rows: the same
+           explicit size and margin, so browser defaults can't make them
+           differ (some phones draw default checkboxes larger) and the
+           "check all" boxes sit directly above the boxes below them.
+           Change width/height here to resize all checkboxes at once. */
         .player-item input[type="checkbox"],
         .list-header input[type="checkbox"] {
-            transform: scale(1.2);
+            width: 14px;
+            height: 14px;
             flex-shrink: 0;
             margin: 0 2px;
         }
