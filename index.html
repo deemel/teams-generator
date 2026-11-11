@@ -209,43 +209,6 @@
             color: #444;
             font-size: 14px;
         }
-        .header-left-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex: 1.3;
-            min-width: 0;
-        }
-        .header-center-group {
-            display: flex;
-            align-items: center;
-            justify-content: flex-start;
-            gap: 10px;
-            flex: 1;
-        }
-        /* GPO holds the -/+ controls, so it gets the wider column */
-        .header-offset-group {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex: 1;
-            text-align: center;
-        }
-        /* GP, EGP and Strk only ever hold a short number, so they get a
-           narrow fixed width instead of a share of the row, leaving more
-           room for the Player column. The width is the same in the header
-           and every row, so the columns stay lined up. nowrap keeps a
-           header's sort arrow on the same line as its label. */
-        .header-right-group,
-        .header-eff-group,
-        .header-streak-group {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex: 0 0 42px;
-            text-align: center;
-            white-space: nowrap;
-        }
         .player-item {
             display: flex;
             justify-content: space-between;
@@ -254,26 +217,51 @@
             padding-bottom: 6px;
             border-bottom: 1px solid #eee;
         }
+
+        /* ---- Column layout ----
+           Every column except Player has a fixed width sized to its content,
+           the same in the header and every row so the columns stay lined up.
+           The Player column takes all the remaining width, so the more the
+           other columns are tightened, the more of each name fits.
+           nowrap on the header cells keeps a sort arrow on the same line as
+           its label. */
+
+        /* Player: takes whatever width is left */
+        .header-left-group,
         .player-left-group {
             display: flex;
             align-items: center;
             gap: 10px;
-            flex: 1.3;
+            flex: 1;
             min-width: 0;
         }
+        /* Chk-in: checkbox plus check-in time */
+        .header-center-group,
         .player-center-group {
             display: flex;
             align-items: center;
             justify-content: flex-start;
             gap: 6px;
-            flex: 1;
+            flex: 0 0 80px;
         }
+        .header-center-group {
+            white-space: nowrap;
+        }
+        /* GPO: -/+ buttons around the offset value */
+        .header-offset-group,
         .player-offset-group {
             display: flex;
             align-items: center;
             justify-content: center;
-            flex: 1;
+            flex: 0 0 100px;
         }
+        .header-offset-group {
+            white-space: nowrap;
+        }
+        /* GP, EGP and Strk: a short number each */
+        .header-right-group,
+        .header-eff-group,
+        .header-streak-group,
         .player-right-group,
         .player-eff-group,
         .player-streak-group {
@@ -282,6 +270,12 @@
             justify-content: center;
             flex: 0 0 42px;
         }
+        .header-right-group,
+        .header-eff-group,
+        .header-streak-group {
+            white-space: nowrap;
+        }
+
         .player-info {
             display: flex;
             align-items: center;
@@ -332,7 +326,7 @@
         .counter-controls {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 4px;
         }
         .counter-btn {
             padding: 4px 8px;
