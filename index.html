@@ -231,14 +231,20 @@
             flex: 1;
             text-align: center;
         }
+        /* GP, EGP and Strk only ever hold a short number, so they get a
+           narrow fixed width instead of a share of the row, leaving more
+           room for the Player column. The width is the same in the header
+           and every row, so the columns stay lined up. nowrap keeps a
+           header's sort arrow on the same line as its label. */
         .header-right-group,
         .header-eff-group,
         .header-streak-group {
             display: flex;
             align-items: center;
             justify-content: center;
-            flex: 0.8;
+            flex: 0 0 42px;
             text-align: center;
+            white-space: nowrap;
         }
         .player-item {
             display: flex;
@@ -274,7 +280,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            flex: 0.8;
+            flex: 0 0 42px;
         }
         .player-info {
             display: flex;
