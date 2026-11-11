@@ -344,16 +344,16 @@
         .player-name-label.unavailable {
             color: #888;
         }
-        /* One rule for every checkbox in the header and the rows: the same
-           explicit size and margin, so browser defaults can't make them
-           differ (some phones draw default checkboxes larger) and the
-           "check all" boxes sit directly above the boxes below them.
-           Change width/height here to resize all checkboxes at once
-           (and CHECKBOX_SPACE in the script, which assumes this size). */
+        /* One rule for every checkbox in the header and the rows. The
+           browser's default checkbox is drawn 20% larger with scale(1.2);
+           change that number to resize all checkboxes at once. The shared
+           margin keeps the "check all" boxes directly above the boxes below
+           them (browser defaults could otherwise shift one set slightly),
+           and leaves room for the enlargement, which doesn't take up layout
+           space of its own. */
         .player-item input[type="checkbox"],
         .list-header input[type="checkbox"] {
-            width: 14px;
-            height: 14px;
+            transform: scale(1.2);
             flex-shrink: 0;
             margin: 0 2px;
         }
@@ -1010,10 +1010,6 @@
 
         // ---- Player column width -------------------------------------------
 
-        // Horizontal space a checkbox takes: its 14px width plus 2px margin
-        // on each side (see the shared checkbox rule in the CSS).
-        const CHECKBOX_SPACE = 18;
-
         // Extra room added after the longest name, so it isn't flush
         // against the next column.
         const PLAYER_COL_BREATHING_ROOM = 8;
@@ -1033,6 +1029,17 @@
         }
 
         /**
+         * Horizontal layout space a checkbox takes: its width plus its left
+         * and right margins. Measured from a real checkbox, since browsers
+         * draw default checkboxes at slightly different sizes. (The CSS
+         * scale(1.2) enlargement is visual only and doesn't add to this.)
+         */
+        function getCheckboxSpace(checkbox) {
+            const style = getComputedStyle(checkbox);
+            return checkbox.offsetWidth + parseFloat(style.marginLeft) + parseFloat(style.marginRight);
+        }
+
+        /**
          * Sizes the Player column to fit the longest player name (or the
          * "Player" heading, if that's wider), plus PLAYER_COL_BREATHING_ROOM,
          * by setting the --player-col-width variable the column CSS uses.
@@ -1042,19 +1049,21 @@
          * follows the roster as players are added.
          */
         function updatePlayerColumnWidth(container) {
+            const headerCheckbox = container.querySelector('.header-left-group input[type="checkbox"]');
             const headerLabel = container.querySelector('.header-left-group .sortable-header');
             const nameLabels = container.querySelectorAll('.player-name-label');
+            if (!headerCheckbox || !headerLabel) return;
+
+            const checkboxSpace = getCheckboxSpace(headerCheckbox);
 
             // Header: checkbox + 10px gap + "Player" (with any sort arrow)
-            let needed = headerLabel
-                ? CHECKBOX_SPACE + 10 + measureTextWidth(headerLabel.textContent, headerLabel)
-                : 0;
+            let needed = checkboxSpace + 10 + measureTextWidth(headerLabel.textContent, headerLabel);
 
             // Rows: checkbox + 8px gap + name. All names share one font, so
             // the font is read from the first label.
             if (nameLabels.length > 0) {
                 const widestName = Math.max(...players.map(p => measureTextWidth(p.name, nameLabels[0])));
-                needed = Math.max(needed, CHECKBOX_SPACE + 8 + widestName);
+                needed = Math.max(needed, checkboxSpace + 8 + widestName);
             }
 
             const width = Math.ceil(needed + PLAYER_COL_BREATHING_ROOM);
