@@ -223,7 +223,7 @@
             gap: 10px;
             flex: 1;
         }
-        /* GP Offset holds the -/+ controls, so it gets the wider column */
+        /* GPO holds the -/+ controls, so it gets the wider column */
         .header-offset-group {
             display: flex;
             align-items: center;
@@ -582,8 +582,8 @@
          * (gamesOffset) plus any manual -/+ adjustment (offsetAdjustment).
          * Can be negative: a negative offset gives a player extra priority in
          * team selection. Players who aren't checked in have no offset, so
-         * this returns 0 for them. This is the value shown in the GP Offset
-         * column and used in all fairness math.
+         * this returns 0 for them. This is the value shown in the GPO
+         * (games played offset) column and used in all fairness math.
          *
          * The two parts are stored separately so that when
          * updateGamesOffsetsAfterDeletion() recalculates the automatic part,
@@ -746,7 +746,7 @@
          * Effective Games Played: a player's raw gamesPlayed plus their total
          * games offset (see getOffset()). Used as the fairness basis for both
          * the check-in average calculation and team generation, and shown in
-         * the "Eff GP" column. Can be negative if the offset is negative.
+         * the "EGP" column. Can be negative if the offset is negative.
          */
         function getEffectiveGamesPlayed(player) {
             return player.gamesPlayed + getOffset(player);
@@ -884,7 +884,7 @@
         /**
          * Formats a checkInTimestamp (ms since epoch, from Date.now()) into a
          * short display string like "03:45" for showing next to a player's
-         * Check-in checkbox. Returns an empty string if no timestamp is set.
+         * Chk-in checkbox. Returns an empty string if no timestamp is set.
          *
          * Uses the device's own time style, but with any AM/PM marker removed:
          * on a 12-hour device 3:45 PM shows as "03:45", while a 24-hour
@@ -902,8 +902,8 @@
         }
 
         /**
-         * Formats a streak score for the Streak column: "+2" for games played
-         * in a row, "-2" for games sat out in a row, "0" for neither.
+         * Formats a streak score for the Strk (streak) column: "+2" for games
+         * played in a row, "-2" for games sat out in a row, "0" for neither.
          */
         function formatStreak(score) {
             return score > 0 ? `+${score}` : String(score);
@@ -966,9 +966,9 @@
         // For each numeric sort column, the value players are compared by.
         // Players without a value get one lower than any real value, so they
         // sort below everyone who has one: -1 for check-in time (real values
-        // are never negative), and -Infinity for GP Offset (not checked in)
-        // and Streak (not available), whose real values can be negative.
-        // GP and Eff GP always have a value.
+        // are never negative), and -Infinity for GPO (not checked in) and
+        // Strk (not available), whose real values can be negative.
+        // GP and EGP always have a value.
         const SORT_KEYS = {
             checkedIn:      p => getCheckInMinutes(p.checkInTimestamp) ?? -1,
             gamesOffset:    p => p.checkedIn ? getOffset(p) : -Infinity,
@@ -1088,7 +1088,7 @@
         }
 
         /**
-         * "Check-in" header checkbox. Checking it checks in and marks everyone
+         * "Chk-in" header checkbox. Checking it checks in and marks everyone
          * available; unchecking it checks everyone out.
          */
         function toggleAllCheckedIn(isChecked) {
@@ -1177,19 +1177,19 @@
                     <div class="header-center-group">
                         <input type="checkbox" id="selectAllCheckedInCheckbox" ${(totalCount > 0 && checkedInCount === totalCount) ? 'checked' : ''}
                             onchange="toggleAllCheckedIn(this.checked)">
-                        ${sortableHeaderHTML("Check-in", 'checkedIn')}
+                        ${sortableHeaderHTML("Chk-in", 'checkedIn')}
                     </div>
                     <div class="header-offset-group">
-                        ${sortableHeaderHTML("GP Offset", 'gamesOffset')}
+                        ${sortableHeaderHTML("GPO", 'gamesOffset')}
                     </div>
                     <div class="header-right-group">
                         ${sortableHeaderHTML("GP", 'gamesPlayed')}
                     </div>
                     <div class="header-eff-group">
-                        ${sortableHeaderHTML("Eff GP", 'effGamesPlayed')}
+                        ${sortableHeaderHTML("EGP", 'effGamesPlayed')}
                     </div>
                     <div class="header-streak-group">
-                        ${sortableHeaderHTML("Streak", 'streak')}
+                        ${sortableHeaderHTML("Strk", 'streak')}
                     </div>
                 </div>
                 <div class="player-rows">${rowsHtml}</div>
@@ -1271,7 +1271,7 @@
         }
 
         /**
-         * -/+ buttons in the GP Offset column. Moves the player's manual
+         * -/+ buttons in the GPO column. Moves the player's manual
          * offsetAdjustment, and so their total offset (getOffset()), by
          * `amount`. The offset may go negative, which gives the player extra
          * priority in team selection. Only works for checked-in players,
@@ -1406,7 +1406,7 @@
         // ---- Team selection ------------------------------------------------
 
         /**
-         * Streak score for an available player, shown in the Streak column.
+         * Streak score for an available player, shown in the Strk column.
          * Counts only games played since they last became available (see
          * markAvailable()), so latecomers and players returning from a rest
          * start at 0 instead of being credited with sit-outs for games they
@@ -1596,7 +1596,7 @@
             // Add to games history. `timestamp` is a display string only, and
             // history is never sorted by time — see getSortedHistoryIndices()
             // for why. Recorded before the player list is re-rendered, so
-            // the Streak column includes this game.
+            // the Strk column includes this game.
             gamesHistory.push({
                 team1: [...pendingTeam1Names],
                 team2: [...pendingTeam2Names],
