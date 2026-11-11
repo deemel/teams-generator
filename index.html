@@ -198,6 +198,9 @@
             max-height: 400px;
             overflow-y: auto;
         }
+        /* box-sizing so the right padding added by renderPlayerList() (to
+           match the rows' scrollbar) comes out of the header's width rather
+           than widening it */
         .list-header {
             display: flex;
             justify-content: space-between;
@@ -208,6 +211,7 @@
             font-weight: bold;
             color: #444;
             font-size: 14px;
+            box-sizing: border-box;
         }
         .player-item {
             display: flex;
@@ -295,10 +299,14 @@
         .player-name-label.unavailable {
             color: #888;
         }
+        /* Same explicit margin on every checkbox in the header and the rows,
+           so browser default styles can't shift one set relative to the other
+           and the "check all" boxes sit directly above the boxes below them */
         .player-item input[type="checkbox"],
         .list-header input[type="checkbox"] {
             transform: scale(1.2);
             flex-shrink: 0;
+            margin: 0 2px;
         }
         .sortable-header {
             cursor: pointer;
@@ -1210,6 +1218,17 @@
             const rowsContainer = container.querySelector('.player-rows');
             if (rowsContainer) {
                 rowsContainer.scrollTop = previousScrollTop;
+            }
+
+            // When the rows scroll, desktop browsers draw a scrollbar inside
+            // them, making each row narrower than the header by its width.
+            // Pad the header by the same amount so both have the same usable
+            // width and every column (and checkbox) lines up with its heading.
+            // Phones use overlay scrollbars that take no space, so this is 0.
+            const header = container.querySelector('.list-header');
+            if (header && rowsContainer) {
+                const scrollbarWidth = rowsContainer.offsetWidth - rowsContainer.clientWidth;
+                header.style.paddingRight = `${scrollbarWidth}px`;
             }
 
             updatePlayerCounts();
