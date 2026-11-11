@@ -232,7 +232,8 @@
             text-align: center;
         }
         .header-right-group,
-        .header-eff-group {
+        .header-eff-group,
+        .header-streak-group {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -268,7 +269,8 @@
             flex: 1;
         }
         .player-right-group,
-        .player-eff-group {
+        .player-eff-group,
+        .player-streak-group {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -890,6 +892,14 @@
         }
 
         /**
+         * Formats a streak score for the Streak column: "+2" for games played
+         * in a row, "-2" for games sat out in a row, "0" for neither.
+         */
+        function formatStreak(score) {
+            return score > 0 ? `+${score}` : String(score);
+        }
+
+        /**
          * Escapes HTML-significant characters in a string before it's interpolated
          * into an innerHTML template. Needed because player names and other
          * user-entered text are set via innerHTML template strings (not textContent,
@@ -942,15 +952,17 @@
         }
 
         // For each numeric sort column, the value players are compared by.
-        // Players without a value (not checked in) get a value lower than any
-        // real one, so they sort below everyone who has one: -1 for check-in
-        // time (real values are never negative), and -Infinity for GP Offset
-        // (real offsets can be negative). GP and Eff GP always have a value.
+        // Players without a value get one lower than any real value, so they
+        // sort below everyone who has one: -1 for check-in time (real values
+        // are never negative), and -Infinity for GP Offset (not checked in)
+        // and Streak (not available), whose real values can be negative.
+        // GP and Eff GP always have a value.
         const SORT_KEYS = {
             checkedIn:      p => getCheckInMinutes(p.checkInTimestamp) ?? -1,
             gamesOffset:    p => p.checkedIn ? getOffset(p) : -Infinity,
             gamesPlayed:    p => p.gamesPlayed,
-            effGamesPlayed: p => getEffectiveGamesPlayed(p)
+            effGamesPlayed: p => getEffectiveGamesPlayed(p),
+            streak:         p => p.available ? getStreakScore(p) : -Infinity
         };
 
         /**
@@ -1105,6 +1117,9 @@
                 let offsetText = p.checkedIn ? getOffset(p) : '-';
                 // Offset only exists while checked in, so -/+ is disabled otherwise
                 let offsetBtnState = p.checkedIn ? '' : 'disabled';
+                // A streak only counts from when the player became available,
+                // so there isn't one while they're unavailable
+                let streakText = p.available ? formatStreak(getStreakScore(p)) : '-';
 
                 return `
                     <div class="player-item">
@@ -1133,6 +1148,9 @@
                         <div class="player-eff-group">
                             <span class="stats-badge">${getEffectiveGamesPlayed(p)}</span>
                         </div>
+                        <div class="player-streak-group">
+                            <span class="stats-badge">${streakText}</span>
+                        </div>
                     </div>
                 `;
             }).join('');
@@ -1157,6 +1175,9 @@
                     </div>
                     <div class="header-eff-group">
                         ${sortableHeaderHTML("Eff GP", 'effGamesPlayed')}
+                    </div>
+                    <div class="header-streak-group">
+                        ${sortableHeaderHTML("Streak", 'streak')}
                     </div>
                 </div>
                 <div class="player-rows">${rowsHtml}</div>
@@ -1373,10 +1394,11 @@
         // ---- Team selection ------------------------------------------------
 
         /**
-         * Streak score for a player. Counts only games played since they last
-         * became available (see markAvailable()), so latecomers and players
-         * returning from a rest start at 0 instead of being credited with
-         * sit-outs for games they weren't there for.
+         * Streak score for an available player, shown in the Streak column.
+         * Counts only games played since they last became available (see
+         * markAvailable()), so latecomers and players returning from a rest
+         * start at 0 instead of being credited with sit-outs for games they
+         * weren't there for. Only meaningful for available players.
          * - NEGATIVE = consecutive games SAT OUT (e.g., -2 = sat out 2 straight games).
          * - POSITIVE = consecutive games PLAYED (e.g., +2 = played 2 straight games).
          * - 0 = no games played since they became available.
@@ -1558,17 +1580,19 @@
                     p.gamesPlayed++;
                 }
             });
-            hideAlert();
-            renderPlayerList();
 
             // Add to games history. `timestamp` is a display string only, and
             // history is never sorted by time — see getSortedHistoryIndices()
-            // for why.
+            // for why. Recorded before the player list is re-rendered, so
+            // the Streak column includes this game.
             gamesHistory.push({
                 team1: [...pendingTeam1Names],
                 team2: [...pendingTeam2Names],
                 timestamp: new Date().toLocaleString()
             });
+
+            hideAlert();
+            renderPlayerList();
             renderHistory();
 
             // Confirm the accept; renderTeamsPreview() restores the label on
