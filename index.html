@@ -513,9 +513,9 @@
             <button onclick="addPlayer()">Add</button>
         </div>
 
+        <!-- Available count, filled in by updatePlayerCounts() -->
         <div class="player-list-container">
-            <span>Available players:</span>
-            <span id="playerCountDisplay" class="player-count"><b>Available:</b> 0 / 0</span>
+            <span id="playerCountDisplay" class="player-count"><b>Available players:</b> 0 / 0</span>
         </div>
         
         <!-- Dynamic Checkboxes Container -->
@@ -1062,7 +1062,7 @@
         function updatePlayerCounts() {
             let total = players.length;
             let availableCount = players.filter(p => p.available).length;
-            document.getElementById('playerCountDisplay').innerHTML = `<b>Available:</b> ${availableCount} / ${total}`;
+            document.getElementById('playerCountDisplay').innerHTML = `<b>Available players:</b> ${availableCount} / ${total}`;
         }
 
         /**
