@@ -828,13 +828,26 @@
         /**
          * Returns the average effective games played (gamesPlayed + offset)
          * among all currently checked-in players, rounded to the nearest integer
-         * (see roundedAverage()). Used as the games-offset value assigned to a
-         * player at the moment they check in, so a newcomer is credited with
-         * roughly what everyone else has played. Returns 0 if no one is checked
-         * in yet.
+         * (see roundedAverage()). Used at the moment a player checks in to work
+         * out their games offset (see computeCheckInOffset()), so a newcomer is
+         * credited with roughly what everyone else has played. Returns 0 if no
+         * one is checked in yet.
          */
         function computeCurrentAvgOffset() {
             return roundedAverage(players.filter(p => p.checkedIn).map(getEffectiveGamesPlayed));
+        }
+
+        /**
+         * The automatic offset for a player checking in: just enough to bring
+         * their effective games played up to `average` (the group's rounded
+         * average at that moment). A new player (0 games) gets the full
+         * average; a player checking back in after checking out keeps the
+         * games they actually played and is only topped up, so those games
+         * aren't counted twice. Never negative, so a player who has already
+         * played more than the average keeps their real count.
+         */
+        function computeCheckInOffset(average, gamesPlayedAtCheckIn) {
+            return Math.max(average - gamesPlayedAtCheckIn, 0);
         }
 
         /**
@@ -846,7 +859,7 @@
         function applyCheckIn(player) {
             // Computed before setting checkedIn, so the player doesn't count
             // themselves in the average.
-            player.gamesOffset = computeCurrentAvgOffset();
+            player.gamesOffset = computeCheckInOffset(computeCurrentAvgOffset(), player.gamesPlayed);
             player.offsetAdjustment = 0;
             player.checkedIn = true;
             player.checkInTimestamp = Date.now();
@@ -889,15 +902,22 @@
         }
 
         /**
-         * A player's effective games played as of the moment the first
+         * A player's raw games played as of the moment the first
          * `historyCount` games had been recorded. Works backward from their
          * current gamesPlayed by subtracting the games they appear in after
          * that point.
          */
-        function getEffectiveGamesPlayedAt(player, historyCount) {
+        function getGamesPlayedAt(player, historyCount) {
             const gamesSince = gamesHistory.slice(historyCount).filter(game => playedIn(game, player.name)).length;
-            const gamesThen = Math.max(0, player.gamesPlayed - gamesSince);
-            return gamesThen + getOffset(player);
+            return Math.max(0, player.gamesPlayed - gamesSince);
+        }
+
+        /**
+         * A player's effective games played as of the moment the first
+         * `historyCount` games had been recorded (see getGamesPlayedAt()).
+         */
+        function getEffectiveGamesPlayedAt(player, historyCount) {
+            return getGamesPlayedAt(player, historyCount) + getOffset(player);
         }
 
         /**
@@ -912,7 +932,9 @@
          * - If it came BEFORE, their gamesAtCheckIn shifts down by one (to keep
          *   pointing at the same spot in history) and their offset is recomputed
          *   from what the earlier-checked-in players had played at that point —
-         *   NOT from their current totals, which include later games.
+         *   NOT from their current totals, which include later games — using
+         *   the same top-up rule as check-in (computeCheckInOffset()) with
+         *   what this player had played at that point.
          *
          * Only the automatic part (gamesOffset) is recomputed; any manual
          * offsetAdjustment is kept as-is.
@@ -932,7 +954,10 @@
                 if (deletedIndex < player.gamesAtCheckIn) {
                     player.gamesAtCheckIn--;
                     const k = player.gamesAtCheckIn;
-                    player.gamesOffset = roundedAverage(earlier.map(pl => getEffectiveGamesPlayedAt(pl, k)));
+                    player.gamesOffset = computeCheckInOffset(
+                        roundedAverage(earlier.map(pl => getEffectiveGamesPlayedAt(pl, k))),
+                        getGamesPlayedAt(player, k)
+                    );
                 }
                 earlier.push(player);
             });
