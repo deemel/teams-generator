@@ -619,7 +619,11 @@
                 gamesOffset: null,
                 offsetAdjustment: 0,
                 gamesAtCheckIn: null,
-                availableSince: null
+                // Stretches of game history the player was available for, as
+                // { from, to } history positions (to is null while they're
+                // still available). getStreakScore() works the streak out
+                // from these; see markAvailable() and markUnavailable().
+                availability: []
             };
         }
 
@@ -880,25 +884,48 @@
         }
 
         /**
-         * Marks a player available and records where in history their current
-         * availability began. getStreakScore() only counts games from that point,
-         * so games a player missed while absent or resting don't count as sitting
-         * out. Only recorded on a real unavailable→available change, so re-marking
-         * an already-available player doesn't reset their streak.
+         * Marks a player available, starting a new stretch of availability at
+         * the current point in history (see getStreakScore() for how breaks
+         * between stretches affect the streak). Only acts on a real
+         * unavailable→available change.
+         *
+         * If their last stretch ended exactly here (no game has been recorded
+         * since they were marked unavailable, e.g. an accidental tap, or
+         * unchecking and rechecking everyone), that stretch is reopened
+         * instead, so the toggle changes nothing.
          */
         function markAvailable(player) {
-            if (!player.available) {
-                player.available = true;
-                player.availableSince = gamesHistory.length;
+            if (player.available) return;
+            player.available = true;
+
+            const last = player.availability[player.availability.length - 1];
+            if (last && last.to === gamesHistory.length) {
+                last.to = null;
+            } else {
+                player.availability.push({ from: gamesHistory.length, to: null });
             }
         }
 
         /**
-         * Marks a player unavailable and clears their availability start point.
+         * Marks a player unavailable, ending their current stretch of
+         * availability at the current point in history. Marking an
+         * already-unavailable player again changes nothing.
          */
         function markUnavailable(player) {
+            if (player.available) {
+                const last = player.availability[player.availability.length - 1];
+                if (last) last.to = gamesHistory.length;
+            }
             player.available = false;
-            player.availableSince = null;
+        }
+
+        /**
+         * Whether the player was available for the game at `gameIndex` in
+         * history, i.e. it falls inside one of their stretches of availability.
+         */
+        function wasAvailableFor(player, gameIndex) {
+            return player.availability.some(span =>
+                span.from <= gameIndex && (span.to === null || gameIndex < span.to));
         }
 
         /**
@@ -1276,8 +1303,8 @@
                 let offsetText = p.checkedIn ? getOffset(p) : '-';
                 // Offset only exists while checked in, so -/+ is disabled otherwise
                 let offsetBtnState = p.checkedIn ? '' : 'disabled';
-                // A streak only counts from when the player became available,
-                // so there isn't one while they're unavailable
+                // The streak only matters for selection while the player is
+                // available, so it's only shown then
                 let streakText = p.available ? formatStreak(getStreakScore(p)) : '-';
 
                 return `
@@ -1563,31 +1590,34 @@
         // ---- Team selection ------------------------------------------------
 
         /**
-         * Streak score for an available player, shown in the Strk column.
-         * Counts only games played since they last became available (see
-         * markAvailable()), so latecomers and players returning from a rest
-         * start at 0 instead of being credited with sit-outs for games they
-         * weren't there for. Only meaningful for available players.
+         * Streak score for a player, shown in the Strk column and used first
+         * in team selection. Worked out from scratch by going through every
+         * game in order, so it's always consistent with the history, even
+         * after a game is deleted:
+         * - A game they were available for and played: extends a playing
+         *   streak, or starts one at +1.
+         * - A game they were available for and sat out: extends a sit-out
+         *   streak, or starts one at -1.
+         * - A game they were away for (unavailable, or not yet checked in):
+         *   a sit-out streak moves one step toward 0, and a playing streak
+         *   drops to 0. So waiting done while present still counts after a
+         *   short break, but skipping a turn costs some of it.
          * - NEGATIVE = consecutive games SAT OUT (e.g., -2 = sat out 2 straight games).
          * - POSITIVE = consecutive games PLAYED (e.g., +2 = played 2 straight games).
-         * - 0 = no games played since they became available.
+         * - 0 = neither (new arrival, or back from a long enough break).
          */
         function getStreakScore(player) {
-            const relevantGames = gamesHistory.slice(player.availableSince);
-            if (relevantGames.length === 0) return 0;
-
-            const playedLast = playedIn(relevantGames[relevantGames.length - 1], player.name);
-
             let streak = 0;
-            for (let i = relevantGames.length - 1; i >= 0; i--) {
-                if (playedIn(relevantGames[i], player.name) === playedLast) {
-                    streak++;
+            gamesHistory.forEach((game, i) => {
+                if (!wasAvailableFor(player, i)) {
+                    streak = streak < 0 ? streak + 1 : 0;
+                } else if (playedIn(game, player.name)) {
+                    streak = streak > 0 ? streak + 1 : 1;
                 } else {
-                    break;
+                    streak = streak < 0 ? streak - 1 : -1;
                 }
-            }
-
-            return playedLast ? streak : -streak;
+            });
+            return streak;
         }
 
         /**
@@ -1786,12 +1816,16 @@
             // Remove game entry from history
             gamesHistory.splice(historyIndex, 1);
 
-            // Keep each availableSince pointing at the same spot in history. A deleted
-            // game before that point shifts it down by one; a game after it doesn't affect it.
+            // Keep each stretch of availability pointing at the same games. A
+            // deleted game before a position shifts it down by one; a game
+            // after it doesn't affect it. A deleted game inside a stretch
+            // shortens it, and one in the gap between two stretches shortens
+            // the break, so getStreakScore() sees the corrected history.
             players.forEach(p => {
-                if (p.availableSince !== null && historyIndex < p.availableSince) {
-                    p.availableSince--;
-                }
+                p.availability.forEach(span => {
+                    if (historyIndex < span.from) span.from--;
+                    if (span.to !== null && historyIndex < span.to) span.to--;
+                });
             });
 
             // Any open preview was generated from the old history (streaks and
