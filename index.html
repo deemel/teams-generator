@@ -268,9 +268,9 @@
            columns always line up. nowrap on the header cells keeps a sort
            arrow on the same line as its label. */
 
-        /* Player: pinned to the left edge while the other columns scroll
-           sideways underneath it. The white background hides them as they
-           pass, and the shadow marks its edge. */
+        /* Player: availability checkbox plus name, pinned to the left edge
+           while the other columns scroll sideways underneath it. The white
+           background hides them as they pass, and the shadow marks its edge. */
         .header-left-group,
         .player-left-group {
             display: flex;
@@ -284,40 +284,45 @@
             background: white;
             box-shadow: 4px 0 4px -4px rgba(0, 0, 0, 0.2);
         }
-        /* Chk-in: checkbox plus check-in time */
+        /* Since: the time the player became available */
         .header-center-group,
         .player-center-group {
             display: flex;
             align-items: center;
             justify-content: flex-start;
-            gap: 6px;
-            flex: 0 0 80px;
+            flex: 0 0 60px;
         }
         .header-center-group {
             white-space: nowrap;
         }
-        /* GPO: -/+ buttons around the offset value */
+        /* GPO: -/+ buttons around the offset value (which may have a decimal) */
         .header-offset-group,
         .player-offset-group {
             display: flex;
             align-items: center;
             justify-content: center;
-            flex: 0 0 100px;
+            flex: 0 0 112px;
         }
         .header-offset-group {
             white-space: nowrap;
         }
-        /* GP, EGP and Strk: a short number each */
+        /* GP and Strk: a short whole number each */
         .header-right-group,
-        .header-eff-group,
         .header-streak-group,
         .player-right-group,
-        .player-eff-group,
         .player-streak-group {
             display: flex;
             align-items: center;
             justify-content: center;
             flex: 0 0 42px;
+        }
+        /* EGP: a little wider, since it may have a decimal */
+        .header-eff-group,
+        .player-eff-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 52px;
         }
         .header-right-group,
         .header-eff-group,
@@ -347,8 +352,8 @@
         /* One rule for every checkbox in the header and the rows. The
            browser's default checkbox is drawn 20% larger with scale(1.2);
            change that number to resize all checkboxes at once. The shared
-           margin keeps the "check all" boxes directly above the boxes below
-           them (browser defaults could otherwise shift one set slightly),
+           margin keeps the "check all" box directly above the boxes below
+           it (browser defaults could otherwise shift one set slightly),
            and leaves room for the enlargement, which doesn't take up layout
            space of its own. */
         .player-item input[type="checkbox"],
@@ -364,7 +369,7 @@
         .sortable-header:hover {
             text-decoration: underline;
         }
-        .checkin-time {
+        .since-time {
             font-size: 0.75rem;
             color: #28a745;
             font-weight: bold;
@@ -394,13 +399,6 @@
         }
         .counter-btn:hover {
             background-color: #ccc;
-        }
-        /* Offset can't be adjusted for players who aren't checked in */
-        .counter-btn:disabled,
-        .counter-btn:disabled:hover {
-            background-color: #ddd;
-            opacity: 0.4;
-            cursor: not-allowed;
         }
         .teams-container {
             display: flex;
@@ -614,15 +612,18 @@
                 name: name.trim(),
                 gamesPlayed: 0,
                 available: false,
-                checkedIn: false,
-                checkInTimestamp: null,
-                gamesOffset: null,
+                // When the player's current stretch of availability began
+                // (ms since epoch), shown in the Since column.
+                availableTimestamp: null,
+                // Manual -/+ adjustment from the GPO column. Kept through
+                // breaks; only Reset clears it.
                 offsetAdjustment: 0,
-                gamesAtCheckIn: null,
                 // Stretches of game history the player was available for, as
                 // { from, to } history positions (to is null while they're
-                // still available). getStreakScore() works the streak out
-                // from these; see markAvailable() and markUnavailable().
+                // still available). The streak (getStreakScore()) and the
+                // credit for missed games (getMissedGamesCredit()) are both
+                // worked out from these; see markAvailable() and
+                // markUnavailable().
                 availability: []
             };
         }
@@ -639,27 +640,28 @@
         }
 
         /**
-         * A player's total games offset: the automatic offset set at check-in
-         * (gamesOffset) plus any manual -/+ adjustment (offsetAdjustment).
-         * Can be negative: a negative offset gives a player extra priority in
-         * team selection. Players who aren't checked in have no offset, so
-         * this returns 0 for them. This is the value shown in the GPO
-         * (games played offset) column and used in all fairness math.
-         *
-         * The two parts are stored separately so that when
-         * updateGamesOffsetsAfterDeletion() recalculates the automatic part,
-         * manual adjustments are kept instead of overwritten.
-         */
-        function getOffset(player) {
-            if (player.gamesOffset === null) return 0;
-            return player.gamesOffset + player.offsetAdjustment;
-        }
-
-        /**
          * Whether the named player was on either team in the given game.
          */
         function playedIn(game, name) {
             return game.team1.includes(name) || game.team2.includes(name);
+        }
+
+        /**
+         * Rounds to two decimal places. Applied to credits and effective games
+         * played so that values which should be equal compare as equal,
+         * instead of differing by tiny floating-point errors.
+         */
+        function roundToHundredths(value) {
+            return Math.round(value * 100) / 100;
+        }
+
+        /**
+         * Formats a GPO or EGP value for display: whole numbers as-is, others
+         * to one decimal place ("4", "4.3"). The exact value is still used for
+         * sorting and team selection.
+         */
+        function formatNumber(value) {
+            return Number.isInteger(value) ? String(value) : value.toFixed(1);
         }
 
         /**
@@ -803,96 +805,17 @@
         // list is currently sorted") rather than two independent values.
         let playerSort = { column: 'name', direction: 'asc' };
 
-        /**
-         * Effective Games Played: a player's raw gamesPlayed plus their total
-         * games offset (see getOffset()). Used as the fairness basis for both
-         * the check-in average calculation and team generation, and shown in
-         * the "EGP" column. Can be negative if the offset is negative.
-         */
-        function getEffectiveGamesPlayed(player) {
-            return player.gamesPlayed + getOffset(player);
-        }
-
-        /**
-         * Returns the average of `values`, rounded to the nearest integer, or 0
-         * for an empty list. Shared by computeCurrentAvgOffset() and
-         * updateGamesOffsetsAfterDeletion() so the check-in offset and its
-         * post-deletion correction always round the same way.
-         *
-         * Rounded rather than floored: flooring always rounded in the newcomer's
-         * favor (an average of 2.9 credited them with only 2), giving late
-         * check-ins a slight but consistent priority edge.
-         */
-        function roundedAverage(values) {
-            return values.length > 0
-                ? Math.round(values.reduce((sum, v) => sum + v, 0) / values.length)
-                : 0;
-        }
-
-        /**
-         * Returns the average effective games played (gamesPlayed + offset)
-         * among all currently checked-in players, rounded to the nearest integer
-         * (see roundedAverage()). Used at the moment a player checks in to work
-         * out their games offset (see computeCheckInOffset()), so a newcomer is
-         * credited with roughly what everyone else has played. Returns 0 if no
-         * one is checked in yet.
-         */
-        function computeCurrentAvgOffset() {
-            return roundedAverage(players.filter(p => p.checkedIn).map(getEffectiveGamesPlayed));
-        }
-
-        /**
-         * The automatic offset for a player checking in: just enough to bring
-         * their effective games played up to `average` (the group's rounded
-         * average at that moment). A new player (0 games) gets the full
-         * average; a player checking back in after checking out keeps the
-         * games they actually played and is only topped up, so those games
-         * aren't counted twice. Never negative, so a player who has already
-         * played more than the average keeps their real count.
-         */
-        function computeCheckInOffset(average, gamesPlayedAtCheckIn) {
-            return Math.max(average - gamesPlayedAtCheckIn, 0);
-        }
-
-        /**
-         * Records a check-in on a player object: offset snapshot, check-in time,
-         * and how many games were already in history at that moment. Shared by
-         * toggleCheckedIn() and checkInAndMarkAllAvailable() so both always
-         * record the same fields. Any manual offset adjustment starts at 0.
-         */
-        function applyCheckIn(player) {
-            // Computed before setting checkedIn, so the player doesn't count
-            // themselves in the average.
-            player.gamesOffset = computeCheckInOffset(computeCurrentAvgOffset(), player.gamesPlayed);
-            player.offsetAdjustment = 0;
-            player.checkedIn = true;
-            player.checkInTimestamp = Date.now();
-            player.gamesAtCheckIn = gamesHistory.length;
-        }
-
-        /**
-         * Clears all check-in fields on a player object, including any manual
-         * offset adjustment. Shared by toggleCheckedIn() and toggleAllCheckedIn().
-         */
-        function applyCheckOut(player) {
-            player.checkedIn = false;
-            markUnavailable(player);
-            player.checkInTimestamp = null;
-            player.gamesOffset = null;
-            player.offsetAdjustment = 0;
-            player.gamesAtCheckIn = null;
-        }
+        // ---- Availability ----------------------------------------------------
 
         /**
          * Marks a player available, starting a new stretch of availability at
-         * the current point in history (see getStreakScore() for how breaks
-         * between stretches affect the streak). Only acts on a real
-         * unavailable→available change.
+         * the current point in history and recording the time for the Since
+         * column. Only acts on a real unavailable→available change.
          *
          * If their last stretch ended exactly here (no game has been recorded
          * since they were marked unavailable, e.g. an accidental tap, or
          * unchecking and rechecking everyone), that stretch is reopened
-         * instead, so the toggle changes nothing.
+         * instead, keeping its original time, so the toggle changes nothing.
          */
         function markAvailable(player) {
             if (player.available) return;
@@ -903,6 +826,7 @@
                 last.to = null;
             } else {
                 player.availability.push({ from: gamesHistory.length, to: null });
+                player.availableTimestamp = Date.now();
             }
         }
 
@@ -928,79 +852,73 @@
                 span.from <= gameIndex && (span.to === null || gameIndex < span.to));
         }
 
-        /**
-         * A player's raw games played as of the moment the first
-         * `historyCount` games had been recorded. Works backward from their
-         * current gamesPlayed by subtracting the games they appear in after
-         * that point.
-         */
-        function getGamesPlayedAt(player, historyCount) {
-            const gamesSince = gamesHistory.slice(historyCount).filter(game => playedIn(game, player.name)).length;
-            return Math.max(0, player.gamesPlayed - gamesSince);
-        }
+        // ---- Games played offset (GPO) and effective games played (EGP) ----
 
         /**
-         * A player's effective games played as of the moment the first
-         * `historyCount` games had been recorded (see getGamesPlayedAt()).
+         * For each game in history, the share of the players available for it
+         * who actually played (e.g. 10 of 14 → about 0.71). This is roughly a
+         * present player's chance of playing that game, so it's what a player
+         * who missed the game is credited with.
          */
-        function getEffectiveGamesPlayedAt(player, historyCount) {
-            return getGamesPlayedAt(player, historyCount) + getOffset(player);
-        }
-
-        /**
-         * Corrects checked-in players' gamesOffset after the game at
-         * `deletedIndex` has been removed from gamesHistory (and gamesPlayed
-         * counts decremented). Must be called AFTER the splice.
-         *
-         * An offset reflects what everyone else had played at the moment a
-         * player checked in, so:
-         * - If the deleted game came AFTER a player's check-in, their offset is
-         *   unchanged — it couldn't have affected it.
-         * - If it came BEFORE, their gamesAtCheckIn shifts down by one (to keep
-         *   pointing at the same spot in history) and their offset is recomputed
-         *   from what the earlier-checked-in players had played at that point —
-         *   NOT from their current totals, which include later games — using
-         *   the same top-up rule as check-in (computeCheckInOffset()) with
-         *   what this player had played at that point.
-         *
-         * Only the automatic part (gamesOffset) is recomputed; any manual
-         * offsetAdjustment is kept as-is.
-         *
-         * Players are processed in check-in order so any earlier player whose
-         * offset changes is already corrected before later players use it.
-         */
-        function updateGamesOffsetsAfterDeletion(deletedIndex) {
-            const checkedInIndices = players
-                .map((p, idx) => idx)
-                .filter(idx => players[idx].checkedIn)
-                .sort((a, b) => (players[a].checkInTimestamp - players[b].checkInTimestamp) || (a - b));
-
-            const earlier = [];
-            checkedInIndices.forEach(idx => {
-                const player = players[idx];
-                if (deletedIndex < player.gamesAtCheckIn) {
-                    player.gamesAtCheckIn--;
-                    const k = player.gamesAtCheckIn;
-                    player.gamesOffset = computeCheckInOffset(
-                        roundedAverage(earlier.map(pl => getEffectiveGamesPlayedAt(pl, k))),
-                        getGamesPlayedAt(player, k)
-                    );
-                }
-                earlier.push(player);
+        function getGameShares() {
+            return gamesHistory.map((game, i) => {
+                const availableCount = players.filter(p => wasAvailableFor(p, i)).length;
+                const playedCount = game.team1.length + game.team2.length;
+                return availableCount > 0 ? Math.min(playedCount / availableCount, 1) : 1;
             });
         }
 
         /**
-         * Formats a checkInTimestamp (ms since epoch, from Date.now()) into a
-         * short display string like "03:45" for showing next to a player's
-         * Chk-in checkbox. Returns an empty string if no timestamp is set.
+         * Credit for the games a player missed: for every game they weren't
+         * available for (before they arrived, or during a break), the share of
+         * available players who played it (see getGameShares()). This puts a
+         * latecomer, or someone back from a break, roughly where they'd be had
+         * they been there and taken normal turns, so arriving late, resting,
+         * and leaving and coming back are all treated the same way. Worked out
+         * from the history, so deleting a game corrects it automatically.
+         */
+        function getMissedGamesCredit(player) {
+            let credit = 0;
+            getGameShares().forEach((share, i) => {
+                if (!wasAvailableFor(player, i)) credit += share;
+            });
+            return credit;
+        }
+
+        /**
+         * A player's games played offset (GPO): credit for the games they
+         * missed (getMissedGamesCredit()) plus any manual -/+ adjustment
+         * (offsetAdjustment). Can be negative if the adjustment is: a negative
+         * offset gives a player extra priority in team selection. Shown in the
+         * GPO column, rounded to one decimal place.
+         */
+        function getOffset(player) {
+            return getMissedGamesCredit(player) + player.offsetAdjustment;
+        }
+
+        /**
+         * Effective Games Played: a player's raw gamesPlayed plus their games
+         * offset (see getOffset()). The fairness basis for team selection, and
+         * shown in the "EGP" column. Can be a fraction, and can be negative if
+         * the offset is negative.
+         */
+        function getEffectiveGamesPlayed(player) {
+            return roundToHundredths(player.gamesPlayed + getOffset(player));
+        }
+
+        // ---- Display helpers -------------------------------------------------
+
+        /**
+         * Formats a timestamp (ms since epoch, from Date.now()) into a short
+         * display string like "03:45" for the Since column. Returns an empty
+         * string if no timestamp is set.
          *
          * Uses the device's own time style, but with any AM/PM marker removed:
          * on a 12-hour device 3:45 PM shows as "03:45", while a 24-hour
-         * device shows "15:45" as before. Trimming removes the space that
-         * separated the marker from the time.
+         * device shows "15:45". Trimming removes the space that separated
+         * the marker from the time.
          */
-        function formatCheckInTime(timestamp) {
+        function formatTime(timestamp) {
             if (!timestamp) return '';
             return new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' })
                 .formatToParts(new Date(timestamp))
@@ -1045,16 +963,15 @@
         }
 
         /**
-         * Converts a checkInTimestamp into minutes since midnight (local time),
-         * matching the same hh:mm granularity shown in the UI via
-         * formatCheckInTime(). Used for sorting so two check-ins that display
-         * the same hh:mm time are correctly treated as ties, rather than
-         * being ordered by their exact (invisible) millisecond difference.
-         * Works from the real 24-hour time, so sorting stays correct even
-         * though the display no longer shows AM/PM.
-         * Returns null if no timestamp is set.
+         * Converts a timestamp into minutes since midnight (local time),
+         * matching the same hh:mm granularity shown in the Since column via
+         * formatTime(). Used for sorting so two times that display the same
+         * hh:mm are correctly treated as ties, rather than being ordered by
+         * their exact (invisible) millisecond difference. Works from the real
+         * 24-hour time, so sorting stays correct even though the display
+         * doesn't show AM/PM. Returns null if no timestamp is set.
          */
-        function getCheckInMinutes(timestamp) {
+        function getTimeMinutes(timestamp) {
             if (!timestamp) return null;
             let d = new Date(timestamp);
             return d.getHours() * 60 + d.getMinutes();
@@ -1128,7 +1045,7 @@
             } else {
                 playerSort.column = column;
                 // Sensible default per column: names read naturally A-Z,
-                // everything else (checkboxes/numbers) reads naturally highest/most-recent-first
+                // everything else (times/numbers) reads naturally highest/most-recent-first
                 playerSort.direction = (column === 'name') ? 'asc' : 'desc';
             }
             renderPlayerList();
@@ -1136,13 +1053,12 @@
 
         // For each numeric sort column, the value players are compared by.
         // Players without a value get one lower than any real value, so they
-        // sort below everyone who has one: -1 for check-in time (real values
-        // are never negative), and -Infinity for GPO (not checked in) and
-        // Strk (not available), whose real values can be negative.
-        // GP and EGP always have a value.
+        // sort below everyone who has one: -1 for the Since time (real values
+        // are never negative), and -Infinity for Strk (not available), whose
+        // real values can be negative. GPO, GP and EGP always have a value.
         const SORT_KEYS = {
-            checkedIn:      p => getCheckInMinutes(p.checkInTimestamp) ?? -1,
-            gamesOffset:    p => p.checkedIn ? getOffset(p) : -Infinity,
+            since:          p => p.available ? (getTimeMinutes(p.availableTimestamp) ?? -1) : -1,
+            gamesOffset:    p => roundToHundredths(getOffset(p)),
             gamesPlayed:    p => p.gamesPlayed,
             effGamesPlayed: p => getEffectiveGamesPlayed(p),
             streak:         p => p.available ? getStreakScore(p) : -Infinity
@@ -1154,22 +1070,23 @@
          * sort by their SORT_KEYS value in the chosen direction, and ties are
          * always broken by name A→Z, whatever the direction.
          *
+         * Each player's key is worked out once up front rather than on every
+         * comparison, since GPO and EGP go through the whole game history.
          * Keys are compared directly rather than subtracted, since subtracting
          * two -Infinity keys gives NaN, which would break the tie-break.
          */
         function getSortedPlayerIndices() {
             const dir = playerSort.direction === 'asc' ? 1 : -1;
             const getKey = SORT_KEYS[playerSort.column];
+            const keys = getKey ? players.map(getKey) : null;
 
             return players.map((_, idx) => idx).sort((a, b) => {
                 const nameCompare = compareNames(players[a].name, players[b].name);
-                if (!getKey) {
+                if (!keys) {
                     return nameCompare * dir;
                 }
-                const keyA = getKey(players[a]);
-                const keyB = getKey(players[b]);
-                if (keyA !== keyB) {
-                    return (keyA < keyB ? -1 : 1) * dir;
+                if (keys[a] !== keys[b]) {
+                    return (keys[a] < keys[b] ? -1 : 1) * dir;
                 }
                 return nameCompare;
             });
@@ -1229,45 +1146,11 @@
         }
 
         /**
-         * Checks in everyone not already checked in, and marks everyone available.
-         * Shared by both "select all" header checkboxes, which behave the same way
-         * when checked. Players are checked in one at a time in array order, so
-         * each new offset is based on everyone checked in so far, including
-         * earlier players in this loop (same as checking them in by hand).
+         * Header checkbox in the Player column. Checking it marks everyone
+         * available; unchecking it marks everyone unavailable.
          */
-        function checkInAndMarkAllAvailable() {
-            players.forEach(p => {
-                if (!p.checkedIn) {
-                    applyCheckIn(p);
-                }
-                markAvailable(p);
-            });
-        }
-
-        /**
-         * "Available" header checkbox. Checking it checks in and marks everyone
-         * available; unchecking it marks everyone unavailable but keeps them
-         * checked in.
-         */
-        function toggleSelectAllAvailable(isChecked) {
-            if (isChecked) {
-                checkInAndMarkAllAvailable();
-            } else {
-                players.forEach(markUnavailable);
-            }
-            renderPlayerList();
-        }
-
-        /**
-         * "Chk-in" header checkbox. Checking it checks in and marks everyone
-         * available; unchecking it checks everyone out.
-         */
-        function toggleAllCheckedIn(isChecked) {
-            if (isChecked) {
-                checkInAndMarkAllAvailable();
-            } else {
-                players.forEach(applyCheckOut);
-            }
+        function toggleSelectAll(isChecked) {
+            players.forEach(isChecked ? markAvailable : markUnavailable);
             renderPlayerList();
         }
 
@@ -1290,19 +1173,16 @@
 
             let totalCount = players.length;
             let availableCount = players.filter(p => p.available).length;
-            let checkedInCount = players.filter(p => p.checkedIn).length;
 
             let sortedIndices = getSortedPlayerIndices();
 
             let rowsHtml = sortedIndices.map((index) => {
                 let p = players[index];
                 let nameClass = p.available ? 'player-name-label' : 'player-name-label unavailable';
-                let checkInTimeHtml = (p.checkedIn && p.checkInTimestamp)
-                    ? `<span class="checkin-time">${escapeHtml(formatCheckInTime(p.checkInTimestamp))}</span>`
+                let sinceHtml = (p.available && p.availableTimestamp)
+                    ? `<span class="since-time">${escapeHtml(formatTime(p.availableTimestamp))}</span>`
                     : '';
-                let offsetText = p.checkedIn ? getOffset(p) : '-';
-                // Offset only exists while checked in, so -/+ is disabled otherwise
-                let offsetBtnState = p.checkedIn ? '' : 'disabled';
+                let offsetText = formatNumber(roundToHundredths(getOffset(p)));
                 // The streak only matters for selection while the player is
                 // available, so it's only shown then
                 let streakText = p.available ? formatStreak(getStreakScore(p)) : '-';
@@ -1317,22 +1197,20 @@
                             </div>
                         </div>
                         <div class="player-center-group">
-                            <input type="checkbox" id="checkedIn_${index}" ${p.checkedIn ? 'checked' : ''}
-                                onchange="toggleCheckedIn(${index}, this.checked)">
-                            ${checkInTimeHtml}
+                            ${sinceHtml}
                         </div>
                         <div class="player-offset-group">
                             <div class="counter-controls">
-                                <button class="counter-btn" onclick="adjustOffset(${index}, -1)" ${offsetBtnState}>-</button>
+                                <button class="counter-btn" onclick="adjustOffset(${index}, -1)">-</button>
                                 <span class="stats-badge">${offsetText}</span>
-                                <button class="counter-btn" onclick="adjustOffset(${index}, 1)" ${offsetBtnState}>+</button>
+                                <button class="counter-btn" onclick="adjustOffset(${index}, 1)">+</button>
                             </div>
                         </div>
                         <div class="player-right-group">
                             <span class="stats-badge">${p.gamesPlayed}</span>
                         </div>
                         <div class="player-eff-group">
-                            <span class="stats-badge">${getEffectiveGamesPlayed(p)}</span>
+                            <span class="stats-badge">${formatNumber(getEffectiveGamesPlayed(p))}</span>
                         </div>
                         <div class="player-streak-group">
                             <span class="stats-badge">${streakText}</span>
@@ -1346,13 +1224,11 @@
                     <div class="list-header">
                         <div class="header-left-group">
                             <input type="checkbox" id="selectAllCheckbox" ${(totalCount > 0 && availableCount === totalCount) ? 'checked' : ''}
-                                onchange="toggleSelectAllAvailable(this.checked)">
+                                onchange="toggleSelectAll(this.checked)">
                             ${sortableHeaderHTML("Player", 'name')}
                         </div>
                         <div class="header-center-group">
-                            <input type="checkbox" id="selectAllCheckedInCheckbox" ${(totalCount > 0 && checkedInCount === totalCount) ? 'checked' : ''}
-                                onchange="toggleAllCheckedIn(this.checked)">
-                            ${sortableHeaderHTML("Chk-in", 'checkedIn')}
+                            ${sortableHeaderHTML("Since", 'since')}
                         </div>
                         <div class="header-offset-group">
                             ${sortableHeaderHTML("GPO", 'gamesOffset')}
@@ -1376,10 +1252,6 @@
             const selectAllCheckbox = document.getElementById('selectAllCheckbox');
             if (selectAllCheckbox) {
                 selectAllCheckbox.indeterminate = availableCount > 0 && availableCount < totalCount;
-            }
-            const selectAllCheckedInCheckbox = document.getElementById('selectAllCheckedInCheckbox');
-            if (selectAllCheckedInCheckbox) {
-                selectAllCheckedInCheckbox.indeterminate = checkedInCount > 0 && checkedInCount < totalCount;
             }
 
             // Size the Player column to the longest name now that it's rendered
@@ -1421,58 +1293,39 @@
             renderPlayerList();
         }
 
+        /**
+         * Checkbox beside a player's name: marks them available (here and
+         * ready to play) or unavailable (resting or gone; the app treats both
+         * the same way).
+         */
         function toggleAvailable(index, isAvailable) {
             const player = players[index];
-
-            // If marking available and they aren't checked in yet, auto check them in
-            if (isAvailable && !player.checkedIn) {
-                toggleCheckedIn(index, true);
-                return; // toggleCheckedIn() already re-renders
-            }
-
             if (isAvailable) {
                 markAvailable(player);
             } else {
                 markUnavailable(player);
             }
-
-            renderPlayerList();
-        }
-
-        function toggleCheckedIn(index, isCheckedIn) {
-            if (isCheckedIn) {
-                // Records the offset snapshot (a fairness input during team
-                // generation) and the history position used to correct it later.
-                applyCheckIn(players[index]);
-                markAvailable(players[index]);
-            } else {
-                applyCheckOut(players[index]);
-            }
-
             renderPlayerList();
         }
 
         /**
          * -/+ buttons in the GPO column. Moves the player's manual
-         * offsetAdjustment, and so their total offset (getOffset()), by
-         * `amount`. The offset may go negative, which gives the player extra
-         * priority in team selection. Only works for checked-in players,
-         * since others have no offset (the buttons are disabled for them anyway).
+         * offsetAdjustment, and so their offset (getOffset()), by `amount`.
+         * The offset may go negative, which gives the player extra priority in
+         * team selection. Works whether or not the player is available, and
+         * the adjustment is kept through breaks until Reset.
          */
         function adjustOffset(index, amount) {
-            const player = players[index];
-            if (!player.checkedIn) return;
-
-            player.offsetAdjustment += amount;
+            players[index].offsetAdjustment += amount;
             renderPlayerList();
         }
 
         /**
          * Starts a fresh session for the currently selected roster: rebuilds
-         * its players from the roster's name list and clears all check-ins,
-         * games played, and history. Runs when the user clicks Reset, and
-         * whenever a roster is selected (from the dropdown or on app startup —
-         * see onRosterSelected()).
+         * its players from the roster's name list and clears all availability,
+         * games played, adjustments, and history. Runs when the user clicks
+         * Reset, and whenever a roster is selected (from the dropdown or on
+         * app startup — see onRosterSelected()).
          */
         function resetTracker() {
             const currentRoster = document.getElementById('rosterSelect').value;
@@ -1598,7 +1451,7 @@
          *   streak, or starts one at +1.
          * - A game they were available for and sat out: extends a sit-out
          *   streak, or starts one at -1.
-         * - A game they were away for (unavailable, or not yet checked in):
+         * - A game they were away for (before arriving, or during a break):
          *   a sit-out streak moves one step toward 0, and a playing streak
          *   drops to 0. So waiting done while present still counts after a
          *   short break, but skipping a turn costs some of it.
@@ -1627,11 +1480,16 @@
          * 2. Within a tier, fewest effective games played (gamesPlayed + offset).
          * 3. Exact ties are broken randomly: each tier is shuffled before the
          *    stable sort, so tied players keep that random order.
+         * Each player's EGP is worked out once up front rather than on every
+         * comparison, since it goes through the whole game history.
          * Callers must ensure at least `count` players are available.
          */
         function selectPlayers(count) {
+            const available = players.filter(p => p.available);
+            const egp = new Map(available.map(p => [p, getEffectiveGamesPlayed(p)]));
+
             const tiers = {};
-            players.filter(p => p.available).forEach(p => {
+            available.forEach(p => {
                 const score = getStreakScore(p);
                 if (!tiers[score]) tiers[score] = [];
                 tiers[score].push(p);
@@ -1641,7 +1499,7 @@
                 .map(Number)
                 .sort((a, b) => a - b)
                 .flatMap(score => shuffle(tiers[score])
-                    .sort((a, b) => getEffectiveGamesPlayed(a) - getEffectiveGamesPlayed(b)));
+                    .sort((a, b) => egp.get(a) - egp.get(b)));
 
             return prioritized.slice(0, count).map(p => p.name);
         }
@@ -1759,7 +1617,7 @@
             // preview has been marked unavailable (or no longer exists) since
             // Generate, the preview no longer reflects who's actually playing.
             // Recording it anyway would put players in history who weren't
-            // credited, corrupting streaks, deletions, and offset corrections.
+            // available for that game, corrupting streaks and credits.
             const unavailableNames = previewNames.filter(name => {
                 const player = players.find(p => p.name === name);
                 return !player || !player.available;
@@ -1783,7 +1641,7 @@
             // Add to games history. `timestamp` is a display string only, and
             // history is never sorted by time — see getSortedHistoryIndices()
             // for why. Recorded before the player list is re-rendered, so
-            // the Strk column includes this game.
+            // the Strk, GPO and EGP columns include this game.
             gamesHistory.push({
                 team1: [...pendingTeam1Names],
                 team2: [...pendingTeam2Names],
@@ -1820,7 +1678,8 @@
             // deleted game before a position shifts it down by one; a game
             // after it doesn't affect it. A deleted game inside a stretch
             // shortens it, and one in the gap between two stretches shortens
-            // the break, so getStreakScore() sees the corrected history.
+            // the break. Streaks and credits are worked out from these and the
+            // history, so they're corrected automatically.
             players.forEach(p => {
                 p.availability.forEach(span => {
                     if (historyIndex < span.from) span.from--;
@@ -1840,7 +1699,6 @@
             pendingTeam2Names = [];
             outputCard.style.display = 'none';
 
-            updateGamesOffsetsAfterDeletion(historyIndex);
             renderPlayerList();
             renderHistory();
 
