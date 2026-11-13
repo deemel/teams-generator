@@ -810,7 +810,8 @@
         /**
          * Marks a player available, starting a new stretch of availability at
          * the current point in history and recording the time for the Since
-         * column. Only acts on a real unavailable→available change.
+         * column. Only acts on a real unavailable→available change. Returns
+         * true if the player's availability changed.
          *
          * If their last stretch ended exactly here (no game has been recorded
          * since they were marked unavailable, e.g. an accidental tap, or
@@ -818,7 +819,7 @@
          * instead, keeping its original time, so the toggle changes nothing.
          */
         function markAvailable(player) {
-            if (player.available) return;
+            if (player.available) return false;
             player.available = true;
 
             const last = player.availability[player.availability.length - 1];
@@ -828,19 +829,21 @@
                 player.availability.push({ from: gamesHistory.length, to: null });
                 player.availableTimestamp = Date.now();
             }
+            return true;
         }
 
         /**
          * Marks a player unavailable, ending their current stretch of
          * availability at the current point in history. Marking an
-         * already-unavailable player again changes nothing.
+         * already-unavailable player again changes nothing. Returns true if
+         * the player's availability changed.
          */
         function markUnavailable(player) {
-            if (player.available) {
-                const last = player.availability[player.availability.length - 1];
-                if (last) last.to = gamesHistory.length;
-            }
+            if (!player.available) return false;
+            const last = player.availability[player.availability.length - 1];
+            if (last) last.to = gamesHistory.length;
             player.available = false;
+            return true;
         }
 
         /**
@@ -1147,10 +1150,14 @@
 
         /**
          * Header checkbox in the Player column. Checking it marks everyone
-         * available; unchecking it marks everyone unavailable.
+         * available; unchecking it marks everyone unavailable. Clears a
+         * pending preview if this changes anyone's availability.
          */
         function toggleSelectAll(isChecked) {
-            players.forEach(isChecked ? markAvailable : markUnavailable);
+            const changes = players.map(isChecked ? markAvailable : markUnavailable);
+            if (changes.includes(true) && isPreviewPending()) {
+                discardPreview(AVAILABILITY_CHANGED_MESSAGE);
+            }
             renderPlayerList();
         }
 
@@ -1296,14 +1303,13 @@
         /**
          * Checkbox beside a player's name: marks them available (here and
          * ready to play) or unavailable (resting or gone; the app treats both
-         * the same way).
+         * the same way). Clears a pending preview if this changes anything.
          */
         function toggleAvailable(index, isAvailable) {
             const player = players[index];
-            if (isAvailable) {
-                markAvailable(player);
-            } else {
-                markUnavailable(player);
+            const changed = isAvailable ? markAvailable(player) : markUnavailable(player);
+            if (changed && isPreviewPending()) {
+                discardPreview(AVAILABILITY_CHANGED_MESSAGE);
             }
             renderPlayerList();
         }
@@ -1521,6 +1527,35 @@
         }
 
         /**
+         * Whether a generated preview is showing and hasn't been accepted yet.
+         */
+        function isPreviewPending() {
+            return document.getElementById('outputCard').style.display !== 'none'
+                && !document.getElementById('acceptBtn').disabled;
+        }
+
+        /**
+         * Clears the teams preview, so Accept can't record a lineup generated
+         * from out-of-date information. Shows `message` only if the preview
+         * was still pending; an already-accepted preview has nothing left
+         * to lose.
+         */
+        function discardPreview(message) {
+            const wasPending = isPreviewPending();
+            pendingTeam1Names = [];
+            pendingTeam2Names = [];
+            document.getElementById('outputCard').style.display = 'none';
+            if (wasPending) showAlert(message);
+        }
+
+        // Shown when availability changes while a preview is pending: the
+        // preview was picked from a different set of available players, and
+        // accepting it would record anyone who became available as having
+        // sat out a game they were never considered for.
+        const AVAILABILITY_CHANGED_MESSAGE =
+            "Teams preview cleared because player availability changed. Generate again for updated teams.";
+
+        /**
          * Generate button handler: validates input, picks who plays
          * (selectPlayers()), splits them into teams (findBestSplit()), and shows
          * the preview.
@@ -1613,11 +1648,11 @@
         function acceptLineup() {
             const previewNames = [...pendingTeam1Names, ...pendingTeam2Names];
 
-            // Refuse to record a lineup that's gone stale: if anyone in the
-            // preview has been marked unavailable (or no longer exists) since
-            // Generate, the preview no longer reflects who's actually playing.
-            // Recording it anyway would put players in history who weren't
-            // available for that game, corrupting streaks and credits.
+            // Safety net: refuse to record a lineup that's gone stale. A
+            // pending preview is already cleared whenever availability changes
+            // (see toggleAvailable()), so this shouldn't trigger, but recording
+            // players who weren't available for the game would corrupt streaks
+            // and credits.
             const unavailableNames = previewNames.filter(name => {
                 const player = players.find(p => p.name === name);
                 return !player || !player.available;
@@ -1689,22 +1724,10 @@
 
             // Any open preview was generated from the old history (streaks and
             // games played), so it no longer reflects who should be playing.
-            // Clear it so Accept can't record a stale lineup. Only notify the
-            // user if the preview was still pending — an already-accepted
-            // preview has nothing left to lose.
-            const outputCard = document.getElementById('outputCard');
-            const acceptBtn = document.getElementById('acceptBtn');
-            const previewWasPending = outputCard.style.display !== 'none' && !acceptBtn.disabled;
-            pendingTeam1Names = [];
-            pendingTeam2Names = [];
-            outputCard.style.display = 'none';
+            discardPreview("Teams preview cleared because game history changed. Generate again for updated teams.");
 
             renderPlayerList();
             renderHistory();
-
-            if (previewWasPending) {
-                showAlert("Teams preview cleared because game history changed. Generate again for updated teams.");
-            }
         }
 
         /**
