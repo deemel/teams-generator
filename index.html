@@ -647,18 +647,21 @@
         }
 
         /**
-         * Rounds to two decimal places. Applied to credits and effective games
-         * played so that values which should be equal compare as equal,
-         * instead of differing by tiny floating-point errors.
+         * Rounds to one decimal place, the same precision shown in the GPO
+         * and EGP columns. Applied everywhere those values are compared, so
+         * players who look tied on screen are tied for selection too (and
+         * broken randomly), and tiny floating-point errors can't make equal
+         * values compare as different.
          */
-        function roundToHundredths(value) {
-            return Math.round(value * 100) / 100;
+        function roundToTenths(value) {
+            return Math.round(value * 10) / 10;
         }
 
         /**
-         * Formats a GPO or EGP value for display: whole numbers as-is, others
-         * to one decimal place ("4", "4.3"). The exact value is still used for
-         * sorting and team selection.
+         * Formats a GPO or EGP value (already rounded with roundToTenths())
+         * for display: whole numbers as-is, others to one decimal place
+         * ("4", "4.3"). What's shown is exactly the value used for sorting and
+         * team selection.
          */
         function formatNumber(value) {
             return Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -893,7 +896,8 @@
          * missed (getMissedGamesCredit()) plus any manual -/+ adjustment
          * (offsetAdjustment). Can be negative if the adjustment is: a negative
          * offset gives a player extra priority in team selection. Shown in the
-         * GPO column, rounded to one decimal place.
+         * GPO column and compared rounded to one decimal place (see
+         * roundToTenths()).
          */
         function getOffset(player) {
             return getMissedGamesCredit(player) + player.offsetAdjustment;
@@ -901,12 +905,14 @@
 
         /**
          * Effective Games Played: a player's raw gamesPlayed plus their games
-         * offset (see getOffset()). The fairness basis for team selection, and
-         * shown in the "EGP" column. Can be a fraction, and can be negative if
-         * the offset is negative.
+         * offset (see getOffset()), rounded to one decimal place. The fairness
+         * basis for team selection, and shown in the "EGP" column. Can be a
+         * fraction, and can be negative if the offset is negative. Since
+         * gamesPlayed is a whole number, the EGP shown always equals GP plus
+         * the GPO shown.
          */
         function getEffectiveGamesPlayed(player) {
-            return roundToHundredths(player.gamesPlayed + getOffset(player));
+            return roundToTenths(player.gamesPlayed + getOffset(player));
         }
 
         // ---- Display helpers -------------------------------------------------
@@ -1061,7 +1067,7 @@
         // real values can be negative. GPO, GP and EGP always have a value.
         const SORT_KEYS = {
             since:          p => p.available ? (getTimeMinutes(p.availableTimestamp) ?? -1) : -1,
-            gamesOffset:    p => roundToHundredths(getOffset(p)),
+            gamesOffset:    p => roundToTenths(getOffset(p)),
             gamesPlayed:    p => p.gamesPlayed,
             effGamesPlayed: p => getEffectiveGamesPlayed(p),
             streak:         p => p.available ? getStreakScore(p) : -Infinity
@@ -1189,7 +1195,7 @@
                 let sinceHtml = (p.available && p.availableTimestamp)
                     ? `<span class="since-time">${escapeHtml(formatTime(p.availableTimestamp))}</span>`
                     : '';
-                let offsetText = formatNumber(roundToHundredths(getOffset(p)));
+                let offsetText = formatNumber(roundToTenths(getOffset(p)));
                 // The streak only matters for selection while the player is
                 // available, so it's only shown then
                 let streakText = p.available ? formatStreak(getStreakScore(p)) : '-';
@@ -1483,7 +1489,8 @@
          * Decides WHO plays next: returns the names of the `count` highest-priority
          * available players. All the fairness rules for selection live here:
          * 1. Streak tier first: longest sit-out streak (most negative score) wins.
-         * 2. Within a tier, fewest effective games played (gamesPlayed + offset).
+         * 2. Within a tier, fewest effective games played (gamesPlayed + offset,
+         *    to one decimal place, exactly as shown in the EGP column).
          * 3. Exact ties are broken randomly: each tier is shuffled before the
          *    stable sort, so tied players keep that random order.
          * Each player's EGP is worked out once up front rather than on every
