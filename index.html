@@ -151,10 +151,15 @@
             flex: 1;
             margin-right: 0;
         }
+        /* The "Available players" row: the count on the left, the priority
+           sort button on the far right. Wraps on narrow screens, and the
+           button's margin-left: auto keeps it right-aligned when it does. */
         .player-list-container {
             display: flex;
+            flex-wrap: wrap;
             justify-content: space-between;
             align-items: center;
+            gap: 8px;
             margin-top: 15px;
             margin-bottom: 5px;
             font-weight: bold;
@@ -165,6 +170,13 @@
             color: #666;
             font-size: 14px;
             font-weight: normal;
+        }
+        /* "Sort by Player Selection Priority" button. Uses the standard orange
+           button color; only its size and position are set here. */
+        .priority-sort-btn {
+            padding: 6px 10px;
+            font-size: 13px;
+            margin-left: auto;
         }
         .player-list {
             border: 1px solid #ddd;
@@ -560,9 +572,11 @@
             <button onclick="addPlayer()">Add</button>
         </div>
 
-        <!-- Available count, filled in by updatePlayerCounts() -->
+        <!-- Available count, filled in by updatePlayerCounts(), and the
+             priority sort button (see sortByPriority()) -->
         <div class="player-list-container">
             <span id="playerCountDisplay" class="player-count"><b>Available players:</b> 0 / 0</span>
+            <button id="prioritySortBtn" class="priority-sort-btn" onclick="sortByPriority()">Sort by Player Selection Priority</button>
         </div>
         
         <!-- Dynamic Checkboxes Container -->
@@ -806,7 +820,11 @@
 
         // Bundled together since they're one piece of state ("how the player
         // list is currently sorted") rather than two independent values.
-        let playerSort = { column: 'name', direction: 'asc' };
+        // column is a column key from the header, or 'priority' for the
+        // "Sort by Player Selection Priority" button (see sortByPriority()).
+        // Starts in priority order, so the list shows who's up next;
+        // resetTracker() returns it to priority order for each new session.
+        let playerSort = { column: 'priority', direction: 'asc' };
 
         // ---- Availability ----------------------------------------------------
 
@@ -1075,9 +1093,11 @@
 
         /**
          * Returns player indices in the current display order (see playerSort).
-         * The name column sorts by name in the chosen direction. Numeric columns
-         * sort by their SORT_KEYS value in the chosen direction, and ties are
-         * always broken by name A→Z, whatever the direction.
+         * The priority sort lists available players in selection order (see
+         * comparePriority()), then unavailable players. The name column sorts
+         * by name in the chosen direction. Numeric columns sort by their
+         * SORT_KEYS value in the chosen direction. Ties are always broken by
+         * name A→Z, whatever the direction.
          *
          * Each player's key is worked out once up front rather than on every
          * comparison, since GPO and EGP go through the whole game history.
@@ -1085,11 +1105,29 @@
          * two -Infinity keys gives NaN, which would break the tie-break.
          */
         function getSortedPlayerIndices() {
+            const indices = players.map((_, idx) => idx);
+
+            if (playerSort.column === 'priority') {
+                // Ties (and the unavailable group) are ordered by name for a
+                // steady display, though actual selection breaks ties randomly.
+                const info = players.map(p => p.available ? getPriorityInfo(p) : null);
+                return indices.sort((a, b) => {
+                    const ia = info[a], ib = info[b];
+                    if (ia && ib) {
+                        const c = comparePriority(ia, ib);
+                        if (c !== 0) return c;
+                    } else if (ia || ib) {
+                        return ia ? -1 : 1;
+                    }
+                    return compareNames(players[a].name, players[b].name);
+                });
+            }
+
             const dir = playerSort.direction === 'asc' ? 1 : -1;
             const getKey = SORT_KEYS[playerSort.column];
             const keys = getKey ? players.map(getKey) : null;
 
-            return players.map((_, idx) => idx).sort((a, b) => {
+            return indices.sort((a, b) => {
                 const nameCompare = compareNames(players[a].name, players[b].name);
                 if (!keys) {
                     return nameCompare * dir;
@@ -1334,10 +1372,11 @@
 
         /**
          * Starts a fresh session for the currently selected roster: rebuilds
-         * its players from the roster's name list and clears all availability,
-         * games played, adjustments, and history. Runs when the user clicks
-         * Reset, and whenever a roster is selected (from the dropdown or on
-         * app startup — see onRosterSelected()).
+         * its players from the roster's name list, clears all availability,
+         * games played, adjustments, and history, and returns the player list
+         * to priority order. Runs when the user clicks Reset, and whenever a
+         * roster is selected (from the dropdown or on app startup — see
+         * onRosterSelected()).
          */
         function resetTracker() {
             const currentRoster = document.getElementById('rosterSelect').value;
@@ -1346,6 +1385,7 @@
             pendingTeam1Names = [];
             pendingTeam2Names = [];
             gamesHistory = [];
+            playerSort = { column: 'priority', direction: 'asc' };
             document.getElementById('playersPerTeamInput').value = 5;
             document.getElementById('newPlayerName').value = '';
             document.getElementById('outputCard').style.display = 'none';
@@ -1486,35 +1526,58 @@
         }
 
         /**
-         * Decides WHO plays next: returns the names of the `count` highest-priority
-         * available players. All the fairness rules for selection live here:
-         * 1. Streak tier first: longest sit-out streak (most negative score) wins.
-         * 2. Within a tier, fewest effective games played (gamesPlayed + offset,
-         *    to one decimal place, exactly as shown in the EGP column).
-         * 3. Exact ties are broken randomly: each tier is shuffled before the
-         *    stable sort, so tied players keep that random order.
-         * Each player's EGP is worked out once up front rather than on every
-         * comparison, since it goes through the whole game history.
+         * The values a player's selection priority is decided by. Worked out
+         * once per player up front, since both go through the whole game
+         * history.
+         */
+        function getPriorityInfo(player) {
+            return {
+                streak: getStreakScore(player),
+                egp: getEffectiveGamesPlayed(player)
+            };
+        }
+
+        /**
+         * The single definition of selection priority, used both for picking
+         * who plays (selectPlayers()) and for the "Sort by Player Selection
+         * Priority" view, so the two can never disagree. Negative means `a`
+         * comes first:
+         * 1. Longest sit-out streak first (most negative Strk).
+         * 2. Then fewest effective games played (EGP, to one decimal place,
+         *    exactly as shown in the EGP column).
+         * Returns 0 for an exact tie; callers decide how to break it.
+         */
+        function comparePriority(a, b) {
+            if (a.streak !== b.streak) return a.streak - b.streak;
+            return a.egp - b.egp;
+        }
+
+        /**
+         * Decides WHO plays next: returns the names of the `count`
+         * highest-priority available players (see comparePriority()). Exact
+         * ties are broken randomly: players are shuffled first, and the
+         * stable sort keeps tied players in that random order.
          * Callers must ensure at least `count` players are available.
          */
         function selectPlayers(count) {
             const available = players.filter(p => p.available);
-            const egp = new Map(available.map(p => [p, getEffectiveGamesPlayed(p)]));
+            const info = new Map(available.map(p => [p, getPriorityInfo(p)]));
 
-            const tiers = {};
-            available.forEach(p => {
-                const score = getStreakScore(p);
-                if (!tiers[score]) tiers[score] = [];
-                tiers[score].push(p);
-            });
+            return shuffle(available)
+                .sort((a, b) => comparePriority(info.get(a), info.get(b)))
+                .slice(0, count)
+                .map(p => p.name);
+        }
 
-            const prioritized = Object.keys(tiers)
-                .map(Number)
-                .sort((a, b) => a - b)
-                .flatMap(score => shuffle(tiers[score])
-                    .sort((a, b) => egp.get(a) - egp.get(b)));
-
-            return prioritized.slice(0, count).map(p => p.name);
+        /**
+         * "Sort by Player Selection Priority" button: shows available players
+         * in the order they'd be picked, highest priority first, with
+         * unavailable players below. Clicking a column header switches back
+         * to that column's sort.
+         */
+        function sortByPriority() {
+            playerSort = { column: 'priority', direction: 'asc' };
+            renderPlayerList();
         }
 
         /**
