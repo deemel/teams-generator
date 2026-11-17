@@ -318,19 +318,21 @@
         .header-offset-group {
             white-space: nowrap;
         }
-        /* GP and Strk: a short whole number each */
+        /* GP: a short whole number */
         .header-right-group,
-        .header-streak-group,
-        .player-right-group,
-        .player-streak-group {
+        .player-right-group {
             display: flex;
             align-items: center;
             justify-content: center;
             flex: 0 0 42px;
         }
-        /* EGP: a little wider, since it may have a decimal */
+        /* EGP: a little wider, since it may have a decimal. Strk: the same
+           width, since it may show "New" for a fresh latecomer (see
+           isNewArrival()). */
         .header-eff-group,
-        .player-eff-group {
+        .player-eff-group,
+        .header-streak-group,
+        .player-streak-group {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -634,10 +636,10 @@
                 offsetAdjustment: 0,
                 // Stretches of game history the player was available for, as
                 // { from, to } history positions (to is null while they're
-                // still available). The streak (getStreakScore()) and the
-                // credit for missed games (getMissedGamesCredit()) are both
-                // worked out from these; see markAvailable() and
-                // markUnavailable().
+                // still available). The streak (getStreakScore()), the credit
+                // for missed games (getMissedGamesCredit()), and fresh
+                // latecomer status (isNewArrival()) are all worked out from
+                // these; see markAvailable() and markUnavailable().
                 availability: []
             };
         }
@@ -876,6 +878,30 @@
                 span.from <= gameIndex && (span.to === null || gameIndex < span.to));
         }
 
+        /**
+         * Whether the player is a fresh latecomer: they first became
+         * available after at least one game was recorded, haven't left since,
+         * and no game has been recorded since they arrived. Players back from
+         * a break don't count (they have more than one stretch of
+         * availability). Stretches that covered no games are ignored, so
+         * checking everyone and then unchecking absentees before the first
+         * game, or an accidental check and uncheck, doesn't stop a player
+         * from counting as a latecomer when they arrive. (Deleting games can
+         * also leave stretches like this.) Worked out from the history, so
+         * the status ends as soon as a game is accepted and is corrected
+         * automatically if a game is deleted. Gives the player a boost in
+         * selection priority (see comparePriority()) and shows "New" in the
+         * Strk column.
+         */
+        function isNewArrival(player) {
+            if (!player.available) return false;
+            const stretches = player.availability.filter(span =>
+                span.to === null || span.to > span.from);
+            if (stretches.length !== 1) return false;
+            const from = stretches[0].from;
+            return from > 0 && from === gamesHistory.length;
+        }
+
         // ---- Games played offset (GPO) and effective games played (EGP) ----
 
         /**
@@ -1083,6 +1109,8 @@
         // sort below everyone who has one: -1 for the Since time (real values
         // are never negative), and -Infinity for Strk (not available), whose
         // real values can be negative. GPO, GP and EGP always have a value.
+        // A fresh latecomer showing "New" sorts by their numeric streak (0)
+        // here; only the priority sort gives them their boost.
         const SORT_KEYS = {
             since:          p => p.available ? (getTimeMinutes(p.availableTimestamp) ?? -1) : -1,
             gamesOffset:    p => roundToTenths(getOffset(p)),
@@ -1235,8 +1263,12 @@
                     : '';
                 let offsetText = formatNumber(roundToTenths(getOffset(p)));
                 // The streak only matters for selection while the player is
-                // available, so it's only shown then
-                let streakText = p.available ? formatStreak(getStreakScore(p)) : '-';
+                // available, so it's only shown then. A fresh latecomer shows
+                // "New" instead, so it's clear why they're ranked ahead of
+                // players who sat out the last game.
+                let streakText = !p.available ? '-'
+                    : isNewArrival(p) ? 'New'
+                    : formatStreak(getStreakScore(p));
 
                 return `
                     <div class="player-item">
@@ -1510,6 +1542,9 @@
          * - NEGATIVE = consecutive games SAT OUT (e.g., -2 = sat out 2 straight games).
          * - POSITIVE = consecutive games PLAYED (e.g., +2 = played 2 straight games).
          * - 0 = neither (new arrival, or back from a long enough break).
+         * A fresh latecomer (see isNewArrival()) shows "New" in the Strk
+         * column instead of their 0, and gets a priority boost in
+         * comparePriority().
          */
         function getStreakScore(player) {
             let streak = 0;
@@ -1527,11 +1562,12 @@
 
         /**
          * The values a player's selection priority is decided by. Worked out
-         * once per player up front, since both go through the whole game
-         * history.
+         * once per player up front, since the streak and EGP both go through
+         * the whole game history.
          */
         function getPriorityInfo(player) {
             return {
+                newArrival: isNewArrival(player),
                 streak: getStreakScore(player),
                 egp: getEffectiveGamesPlayed(player)
             };
@@ -1542,13 +1578,19 @@
          * who plays (selectPlayers()) and for the "Sort by Player Selection
          * Priority" view, so the two can never disagree. Negative means `a`
          * comes first:
-         * 1. Longest sit-out streak first (most negative Strk).
+         * 1. Longest sit-out streak first (most negative Strk). A fresh
+         *    latecomer (see isNewArrival()) ranks as if their streak were
+         *    -1.5: ahead of anyone who sat out just the last game, but behind
+         *    anyone who has sat out two or more in a row. That gets
+         *    latecomers into a game quickly without making anyone sit out
+         *    three straight games to make room for them.
          * 2. Then fewest effective games played (EGP, to one decimal place,
          *    exactly as shown in the EGP column).
          * Returns 0 for an exact tie; callers decide how to break it.
          */
         function comparePriority(a, b) {
-            if (a.streak !== b.streak) return a.streak - b.streak;
+            const rank = info => info.newArrival ? -1.5 : info.streak;
+            if (rank(a) !== rank(b)) return rank(a) - rank(b);
             return a.egp - b.egp;
         }
 
@@ -1746,7 +1788,8 @@
             // Add to games history. `timestamp` is a display string only, and
             // history is never sorted by time — see getSortedHistoryIndices()
             // for why. Recorded before the player list is re-rendered, so
-            // the Strk, GPO and EGP columns include this game.
+            // the Strk, GPO and EGP columns include this game (and any fresh
+            // latecomers lose their "New" status).
             gamesHistory.push({
                 team1: [...pendingTeam1Names],
                 team2: [...pendingTeam2Names],
@@ -1783,8 +1826,9 @@
             // deleted game before a position shifts it down by one; a game
             // after it doesn't affect it. A deleted game inside a stretch
             // shortens it, and one in the gap between two stretches shortens
-            // the break. Streaks and credits are worked out from these and the
-            // history, so they're corrected automatically.
+            // the break. Streaks, credits, and fresh latecomer status are
+            // worked out from these and the history, so they're corrected
+            // automatically.
             players.forEach(p => {
                 p.availability.forEach(span => {
                     if (historyIndex < span.from) span.from--;
