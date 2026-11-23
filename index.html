@@ -1569,6 +1569,7 @@
             return {
                 newArrival: isNewArrival(player),
                 streak: getStreakScore(player),
+                hasPlayed: player.gamesPlayed > 0,
                 egp: getEffectiveGamesPlayed(player)
             };
         }
@@ -1584,17 +1585,19 @@
          *    behind anyone who has sat out two or more in a row. That gets
          *    latecomers into a game quickly without making anyone sit out
          *    three straight games to make room for them.
-         * 2. Then fewest effective games played (EGP, to one decimal place,
-         *    exactly as shown in the EGP column). Among the -1 group, this
-         *    puts a waiting player who has played less (e.g. none at all)
-         *    ahead of a latecomer, whose EGP includes credit for the games
-         *    they missed, while a latecomer still goes ahead of waiting
-         *    players who have already played more.
+         * 2. Then players who haven't played a game yet (GP 0) ahead of those
+         *    who have. Since a fresh latecomer always has GP 0, this puts
+         *    them ahead of everyone in the -1 group who has already played.
+         * 3. Then fewest effective games played (EGP, to one decimal place,
+         *    exactly as shown in the EGP column). Among players who haven't
+         *    played, this puts a waiting player (EGP 0) ahead of a latecomer,
+         *    whose EGP includes credit for the games they missed.
          * Returns 0 for an exact tie; callers decide how to break it.
          */
         function comparePriority(a, b) {
             const rank = info => info.newArrival ? -1 : info.streak;
             if (rank(a) !== rank(b)) return rank(a) - rank(b);
+            if (a.hasPlayed !== b.hasPlayed) return a.hasPlayed ? 1 : -1;
             return a.egp - b.egp;
         }
 
