@@ -889,9 +889,9 @@
          * from counting as a latecomer when they arrive. (Deleting games can
          * also leave stretches like this.) Worked out from the history, so
          * the status ends as soon as a game is accepted and is corrected
-         * automatically if a game is deleted. Gives the player a boost in
-         * selection priority (see comparePriority()) and shows "New" in the
-         * Strk column.
+         * automatically if a game is deleted. Ranks the player alongside
+         * those who sat out the last game (see comparePriority()) and shows
+         * "New" in the Strk column.
          */
         function isNewArrival(player) {
             if (!player.available) return false;
@@ -1264,8 +1264,8 @@
                 let offsetText = formatNumber(roundToTenths(getOffset(p)));
                 // The streak only matters for selection while the player is
                 // available, so it's only shown then. A fresh latecomer shows
-                // "New" instead, so it's clear why they're ranked ahead of
-                // players who sat out the last game.
+                // "New" instead, so it's clear why they're ranked alongside
+                // players who sat out the last game despite a streak of 0.
                 let streakText = !p.available ? '-'
                     : isNewArrival(p) ? 'New'
                     : formatStreak(getStreakScore(p));
@@ -1543,7 +1543,7 @@
          * - POSITIVE = consecutive games PLAYED (e.g., +2 = played 2 straight games).
          * - 0 = neither (new arrival, or back from a long enough break).
          * A fresh latecomer (see isNewArrival()) shows "New" in the Strk
-         * column instead of their 0, and gets a priority boost in
+         * column instead of their 0, and is ranked as -1 in
          * comparePriority().
          */
         function getStreakScore(player) {
@@ -1580,16 +1580,20 @@
          * comes first:
          * 1. Longest sit-out streak first (most negative Strk). A fresh
          *    latecomer (see isNewArrival()) ranks as if their streak were
-         *    -1.5: ahead of anyone who sat out just the last game, but behind
-         *    anyone who has sat out two or more in a row. That gets
+         *    -1: level with players who sat out just the last game, and
+         *    behind anyone who has sat out two or more in a row. That gets
          *    latecomers into a game quickly without making anyone sit out
          *    three straight games to make room for them.
          * 2. Then fewest effective games played (EGP, to one decimal place,
-         *    exactly as shown in the EGP column).
+         *    exactly as shown in the EGP column). Among the -1 group, this
+         *    puts a waiting player who has played less (e.g. none at all)
+         *    ahead of a latecomer, whose EGP includes credit for the games
+         *    they missed, while a latecomer still goes ahead of waiting
+         *    players who have already played more.
          * Returns 0 for an exact tie; callers decide how to break it.
          */
         function comparePriority(a, b) {
-            const rank = info => info.newArrival ? -1.5 : info.streak;
+            const rank = info => info.newArrival ? -1 : info.streak;
             if (rank(a) !== rank(b)) return rank(a) - rank(b);
             return a.egp - b.egp;
         }
